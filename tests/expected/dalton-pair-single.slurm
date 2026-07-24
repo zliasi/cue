@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=hf-water
-#SBATCH --output=output/%x.log
+#SBATCH --output=log/%x.log
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
@@ -14,7 +14,7 @@ input_path="hf.dal"
 secondary_path="water.mol"
 stem="hf-water"
 
-mkdir -p output
+mkdir -p "out" "log"
 
 scratch="/scratch/$SLURM_JOB_ID"
 mkdir -p "$scratch"
@@ -34,10 +34,10 @@ cd "$scratch"
 input="$(basename "$input_path")"
 secondary="$(basename "$secondary_path")"
 
-"$dalton_bin" -d -np 1 -gb 2 -t "$scratch" -dal "$input" -mol "$secondary" -o "$SLURM_SUBMIT_DIR/output/$stem.out"
+"$dalton_bin" -d -np 1 -gb 2 -t "$scratch" -dal "$input" -mol "$secondary" -o "$SLURM_SUBMIT_DIR/out/$stem.out"
 
 cd "$SLURM_SUBMIT_DIR"
-tar -cJf "output/$stem.tar.xz" -C "$scratch" .
+tar -cJf "out/$stem.tar.xz" -C "$scratch" .
 rm -rf "$scratch"
 
 sleep 2

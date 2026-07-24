@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=a
 #SBATCH --array=1-2%5
-#SBATCH --output=output/%x_%a.log
+#SBATCH --output=log/%x_%a.log
 #SBATCH --nodes=1
 #SBATCH --ntasks=8
 #SBATCH --cpus-per-task=1
@@ -16,7 +16,7 @@ stem="$(basename "$input_path")"
 stem="${stem%.*}"
 input="$input_path"
 
-mkdir -p output
+mkdir -p "out" "log"
 
 set +u
 export OPENBLAS_NUM_THREADS=1

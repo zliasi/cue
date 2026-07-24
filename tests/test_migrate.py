@@ -113,7 +113,7 @@ class RoundTripTests(unittest.TestCase):
         self.assertEqual(code, 0, stderr)
         self.assertIn("/opt/mine/latest/mine", stdout)
         self.assertIn("module purge", stdout)
-        self.assertIn('tar -cJf "output/$stem.tar.xz"', stdout)
+        self.assertIn('tar -cJf "out/$stem.tar.xz"', stdout)
 
 
 if __name__ == "__main__":

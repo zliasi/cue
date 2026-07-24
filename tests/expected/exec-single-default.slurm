@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=hello.sh
-#SBATCH --output=output/%x.log
+#SBATCH --output=log/%x.log
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
@@ -14,7 +14,7 @@ input_path="hello.sh"
 stem="hello.sh"
 input="$input_path"
 
-mkdir -p output
+mkdir -p "out" "log"
 
 bash "$input"
 

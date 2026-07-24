@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=dft-a
 #SBATCH --array=1-3%5
-#SBATCH --output=output/%x_%a.log
+#SBATCH --output=log/%x_%a.log
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
@@ -16,7 +16,7 @@ stem="$(basename "$input_path")"
 secondary_stem="$(basename "$secondary_path")"
 stem="${stem%.*}-${secondary_stem%.*}"
 
-mkdir -p output
+mkdir -p "out" "log"
 
 scratch="/scratch/$SLURM_JOB_ID/$SLURM_ARRAY_TASK_ID"
 mkdir -p "$scratch"
@@ -36,10 +36,10 @@ cd "$scratch"
 input="$(basename "$input_path")"
 secondary="$(basename "$secondary_path")"
 
-"$dalton_bin" -d -np 1 -gb 32 -t "$scratch" -dal "$input" -mol "$secondary" -o "$SLURM_SUBMIT_DIR/output/$stem.out"
+"$dalton_bin" -d -np 1 -gb 32 -t "$scratch" -dal "$input" -mol "$secondary" -o "$SLURM_SUBMIT_DIR/out/$stem.out"
 
 cd "$SLURM_SUBMIT_DIR"
-tar -cJf "output/$stem.tar.xz" -C "$scratch" .
+tar -cJf "out/$stem.tar.xz" -C "$scratch" .
 rm -rf "$scratch"
 
 sleep 2

@@ -340,7 +340,7 @@ class StatusTests(unittest.TestCase):
         )
         patcher.start()
         self.addCleanup(patcher.stop)
-        record_dir = Path("output/.record")
+        record_dir = Path("out/.rec")
         record_dir.mkdir(parents=True)
         for name in ("a.xyz", "b.xyz", "c.xyz", "d.xyz", "e.xyz"):
             Path(name).write_text("")
@@ -408,14 +408,36 @@ class StatusTests(unittest.TestCase):
         self.assertIn("--array=1-2%5", stdout)
         self.assertIn("--cpus-per-task=4", stdout)
 
+    def test_scans_extra_stores(self) -> None:
+        extra = Path("gpaw-out/.rec")
+        extra.mkdir(parents=True)
+        (extra / "2026-07-04-13-00-00-103.slpy").write_text(
+            f"task = \"exec\"\ninput = ['{Path('a.xyz').resolve()}']\n"
+        )
+        runner, code, stdout, _ = self.run_status(["status"])
+        self.assertEqual(code, 0)
+        self.assertIn("--jobs=100,101,102,103", runner.calls[0][1])
+        self.assertIn("103", stdout)
+
+    def test_dir_flag_restricts(self) -> None:
+        extra = Path("gpaw-out/.rec")
+        extra.mkdir(parents=True)
+        (extra / "2026-07-04-13-00-00-103.slpy").write_text(
+            f"task = \"exec\"\ninput = ['{Path('a.xyz').resolve()}']\n"
+        )
+        runner, code, stdout, _ = self.run_status(["status", "--dir", "gpaw-out"])
+        self.assertEqual(code, 0)
+        self.assertIn("--jobs=103", runner.calls[0][1])
+        self.assertNotIn("101", stdout)
+
     def test_no_records_directory(self) -> None:
         os.chdir(self._tmp.name)
         import shutil
 
-        shutil.rmtree("output")
+        shutil.rmtree("out")
         _, code, _, stderr = self.run_status(["status"])
         self.assertEqual(code, 1)
-        self.assertIn("no output/.record/", stderr)
+        self.assertIn("no .rec/ record stores", stderr)
 
 
 class HistoryTests(CommandTestCase):

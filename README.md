@@ -79,9 +79,10 @@ sorca -c 8 -m 16 -t 1-00:00:00 h2o.inp
 
 Passing multiple inputs submits one throttled job array, never separate
 jobs. For loops throttle Slurm, affecting you and everyone else on the 
-cluster.  Results land in `output/`, existing results are 
-moved to `output/backup/` (`.bck01` ... `.bck99`) before each submission, 
-never overwritten. `--dry-run` prints the generated script instead of
+cluster.  Results land in `out/` and slurm logs in `log/` (change with 
+`--outdir`/`--logdir`, per task in `[execution]`, or site-wide in 
+`slurpy.toml`). Existing results are moved to `out/backup/` 
+(`.bck01` ... `.bck99`) before each submission, never overwritten. `--dry-run` prints the generated script instead of
 submitting. Variants like `slurpy orca-dev input.inp` (or
 `--variant dev`) use `orca-dev.toml`.
 
@@ -98,6 +99,8 @@ Use `-h` for an overview of flags
 -T, --throttle INT          max concurrent array tasks  (default: 5)
 -t, --time D-HH:MM:SS       time limit                  (default: partition default)
 -p, --partition NAME        partition
+-o, --out, --outdir DIR     output directory            (default: out/)
+-l, --log, --logdir DIR     slurm log directory         (default: log/)
 -j, --job-name NAME         custom job name             (default: input stem)
     --gpu INT               gpus per node
     --account NAME          slurm account
@@ -144,7 +147,7 @@ Plain input lists work too: `-M list.txt` (one path per line, `#`
 comments allowed), or `manifest = "list.txt"` inside a job file.
 
 Every submission is auto-recorded as a minimal job file in
-`output/.record/yyyy-mm-dd-hh-mm-ss-<jobid>.slpy` (oldest deleted beyond
+`<outdir>/.rec/yyyy-mm-dd-hh-mm-ss-<jobid>.slpy` (oldest deleted beyond
 `record_limit`, default 1000), so any previous run can be repeated with
 `-f`. `--record [FILE]` additionally writes a visible, commented record
 (default name like `slurpy-orca-h2o-c8m16pchem.slpy`).
@@ -183,6 +186,8 @@ slurpy hist 12345 opt-run    specific finished jobs, by id or name
 slurpy status                fate of every job submitted from this
                              directory, from the auto-records
 slurpy status orca 3d        filter by task, id, or time window
+slurpy status --dir DIR      read one output directory's records only
+                             (default: every .rec/ store found here)
 slurpy status --rerun        write rerun-<jobid>.slpy job files covering
                              exactly the failed tasks
 slurpy cancel ID|NAME ...    cancel jobs (asks before name matches,
@@ -231,9 +236,11 @@ cpus = 1
 memory_gb = 2
 throttle = 5
 scratch_base = "/scratch"
+outdir = "out"           # where results land, per submission directory
+logdir = "log"           # where slurm logs land
 max_cpus = 64            # optional guard rails
 max_array_size = 5000    # refuse larger submissions before slurm does
-record_limit = 100       # auto-recorded job files kept in output/.record/
+record_limit = 100       # auto-recorded job files kept in <outdir>/.rec/
 ```
 
 **`software/<name>.toml`**, the full software definition:
@@ -272,7 +279,7 @@ any config with `slurpy <name> --dry-run input` before submitting.
 
 ## Shipped task configs
 
-**orca** - input `.inp`, output streams to `output/<stem>.out`. Runs from
+**orca** - input `.inp`, output streams to `out/<stem>.out`. Runs from
 scratch; retrieves `.gbw`, `.xyz`; archives the scratch.
 
 **gaussian** - input `.com` / `.gjf`. Runs from scratch via `GAUSS_SCRDIR`;

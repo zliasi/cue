@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=benzene
 #SBATCH --array=1-2%5
-#SBATCH --output=output/%x_%a.log
+#SBATCH --output=log/%x_%a.log
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
@@ -15,7 +15,7 @@ input_path="$(sed -n "${SLURM_ARRAY_TASK_ID}p" ".benzene.manifest")"
 stem="$(basename "$(dirname "$input_path")")"
 input="$input_path"
 
-mkdir -p output
+mkdir -p "out" "log"
 
 set +u
 export TURBODIR="/opt/turbomole"

@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=relax
-#SBATCH --output=output/%x.log
+#SBATCH --output=log/%x.log
 #SBATCH --nodes=1
 #SBATCH --ntasks=8
 #SBATCH --cpus-per-task=1
@@ -14,7 +14,7 @@ input_path="relax.py"
 stem="relax"
 input="$input_path"
 
-mkdir -p output
+mkdir -p "out" "log"
 
 set +u
 export OPENBLAS_NUM_THREADS=1

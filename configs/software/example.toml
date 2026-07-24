@@ -48,12 +48,16 @@ export OMP_NUM_THREADS={cpus}
 command = '"{my_program}" "{input}" > "{output_dir}/{stem}.out"'
 # run inside a per-job scratch directory and clean it up afterwards.
 scratch = false
-# tar the scratch directory into output/<stem>.tar.xz when done.
+# tar the scratch directory into <outdir>/<stem>.tar.xz when done.
 archive = false
-# file extensions copied back from scratch to output/.
+# file extensions copied back from scratch to <outdir>/.
 retrieve = []
 # default program for {launcher}, overridable with --launcher.
 # launcher = "bash"
+# per-task output and slurm log directories, override the site defaults
+# and are overridden by --outdir and --logdir.
+# outdir = "out"
+# logdir = "log"
 
 # [slurm]
 # exclude nodes, either inline or from a file with one node per line.

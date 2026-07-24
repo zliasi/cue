@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=analysis
-#SBATCH --output=output/%x.log
+#SBATCH --output=log/%x.log
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
@@ -14,7 +14,7 @@ input_path="analysis.py"
 stem="analysis"
 input="$input_path"
 
-mkdir -p output
+mkdir -p "out" "log"
 
 set +u
 export OMP_NUM_THREADS=4

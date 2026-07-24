@@ -122,6 +122,8 @@ TIME_LIMIT_RE = re.compile(r"^\d+(-\d{1,2})?(:\d{2})?(:\d{2})?$")
 SOFTWARE_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 # Characters safe to embed in the generated script and slurm directives.
 INPUT_NAME_RE = re.compile(r"^[A-Za-z0-9._+/-]+$")
+DIR_NAME_RE = re.compile(r"^[A-Za-z0-9._+/-]+$")
+RECORD_SUBDIR = ".rec"
 JOB_NAME_RE = re.compile(r"^[A-Za-z0-9._+-]+$")
 RETRIEVE_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 # Lowercase {name} placeholders. ${NAME} shell expansions pass through.
@@ -299,6 +301,8 @@ class SiteDefaults:
     max_memory_gb: int | None = None
     max_array_size: int = 1000
     record_limit: int = 1000
+    outdir: str = "out"
+    logdir: str = "log"
 
 
 _DEFAULTS_INT_KEYS = (
@@ -312,7 +316,7 @@ _DEFAULTS_INT_KEYS = (
     "max_array_size",
     "record_limit",
 )
-_DEFAULTS_STR_KEYS = ("partition", "scratch_base")
+_DEFAULTS_STR_KEYS = ("partition", "scratch_base", "outdir", "logdir")
 _DEFAULTS_KEYS = _DEFAULTS_INT_KEYS + _DEFAULTS_STR_KEYS
 
 
@@ -386,6 +390,8 @@ def load_site_defaults(search_path: Sequence[Path]) -> SiteDefaults:
         max_memory_gb=optional_int("max_memory_gb"),
         max_array_size=int_value("max_array_size", fallback.max_array_size),
         record_limit=int_value("record_limit", fallback.record_limit),
+        outdir=optional_str("outdir") or fallback.outdir,
+        logdir=optional_str("logdir") or fallback.logdir,
     )
 
 
@@ -411,6 +417,8 @@ class SoftwareConfig:
     exclude_partition: str | None
     inject_memory_fraction: float
     inject_rules: tuple[tuple[str, str], ...]
+    outdir: str | None
+    logdir: str | None
 
 
 _SOFTWARE_TABLES = (
@@ -497,7 +505,7 @@ def parse_software_config(path: Path, name: str) -> SoftwareConfig:
     execution = _get_table(data, "execution", path)
     _check_keys(
         execution,
-        ("command", "scratch", "archive", "retrieve", "launcher"),
+        ("command", "scratch", "archive", "retrieve", "launcher", "outdir", "logdir"),
         "[execution]",
         path,
     )
@@ -518,6 +526,15 @@ def parse_software_config(path: Path, name: str) -> SoftwareConfig:
                 "dashes"
             )
     launcher = _get_str(execution, "launcher", "[execution]", path)
+    config_outdir = _get_str(execution, "outdir", "[execution]", path)
+    config_logdir = _get_str(execution, "logdir", "[execution]", path)
+    for dir_key, dir_value in (("outdir", config_outdir), ("logdir", config_logdir)):
+        if dir_value is not None and not DIR_NAME_RE.fullmatch(dir_value):
+            raise SlurpyError(
+                f'"{dir_key}" in [execution] of {path} contains unsupported '
+                "characters. use letters, digits, dots, dashes, "
+                "underscores, and slashes"
+            )
     if archive and not scratch:
         raise SlurpyError(
             f"{path} sets archive = true without scratch = true. archiving "
@@ -643,6 +660,8 @@ def parse_software_config(path: Path, name: str) -> SoftwareConfig:
         exclude_partition=exclude_partition,
         inject_memory_fraction=inject_memory_fraction,
         inject_rules=tuple(inject_rules),
+        outdir=config_outdir,
+        logdir=config_logdir,
     )
 
 
@@ -716,6 +735,8 @@ class JobSpec:
     archive: bool
     launcher: str | None
     program_args: str
+    outdir: str
+    logdir: str
 
 
 def manifest_name(job_name: str) -> str:
@@ -726,9 +747,9 @@ def render_header(spec: JobSpec) -> list[str]:
     lines = ["#!/bin/bash", f"#SBATCH --job-name={spec.job_name}"]
     if spec.array:
         lines.append(f"#SBATCH --array=1-{len(spec.inputs)}%{spec.throttle}")
-        lines.append("#SBATCH --output=output/%x_%a.log")
+        lines.append(f"#SBATCH --output={spec.logdir}/%x_%a.log")
     else:
-        lines.append("#SBATCH --output=output/%x.log")
+        lines.append(f"#SBATCH --output={spec.logdir}/%x.log")
     lines.append(f"#SBATCH --nodes={spec.nodes}")
     lines.append(f"#SBATCH --ntasks={spec.ntasks}")
     if spec.ntasks_per_node is not None:
@@ -758,12 +779,21 @@ def render_header(spec: JobSpec) -> list[str]:
     return lines
 
 
+def _submit_relative(directory: str) -> str:
+    """A path usable from inside scratch: absolute as-is, else via submit dir."""
+    if os.path.isabs(directory):
+        return directory
+    return f"$SLURM_SUBMIT_DIR/{directory}"
+
+
 def _placeholder_values(spec: JobSpec, software: SoftwareConfig) -> dict[str, str]:
     values = {
         "input": "$input",
         "input_path": "$input_path",
         "stem": "$stem",
-        "output_dir": ("$SLURM_SUBMIT_DIR/output" if software.scratch else "output"),
+        "output_dir": (
+            _submit_relative(spec.outdir) if software.scratch else spec.outdir
+        ),
         "cpus": str(spec.cpus),
         "ntasks": str(spec.ntasks),
         "nodes": str(spec.nodes),
@@ -817,7 +847,7 @@ def render_body(
         lines.append('input="$input_path"')
         if secondaries is not None:
             lines.append('secondary="$secondary_path"')
-    lines += ["", "mkdir -p output"]
+    lines += ["", f'mkdir -p "{spec.outdir}" "{spec.logdir}"']
     if software.scratch:
         task_dir = (
             "$SLURM_JOB_ID/$SLURM_ARRAY_TASK_ID" if spec.array else "$SLURM_JOB_ID"
@@ -849,14 +879,14 @@ def render_body(
             "",
             f"for ext in {' '.join(software.retrieve)}; do",
             '  if [[ -f "$stem.$ext" ]]; then',
-            '    cp "$stem.$ext" "$SLURM_SUBMIT_DIR/output/"',
+            f'    cp "$stem.$ext" "{_submit_relative(spec.outdir)}/"',
             "  fi",
             "done",
         ]
     if software.scratch:
         lines += ["", 'cd "$SLURM_SUBMIT_DIR"']
         if spec.archive:
-            lines.append('tar -cJf "output/$stem.tar.xz" -C "$scratch" .')
+            lines.append(f'tar -cJf "{spec.outdir}/$stem.tar.xz" -C "$scratch" .')
         lines.append('rm -rf "$scratch"')
     lines += ["", "sleep 2", SACCT_LINE]
     return lines
@@ -1109,6 +1139,21 @@ def resolve_spec(
             "a plain name with --job-name"
         )
 
+    def resolve_dir(cli_value: str | None, config_value: str | None, key: str) -> str:
+        value = cli_value if cli_value is not None else config_value
+        if value is None:
+            value = getattr(site, key)
+        value = os.path.expanduser(value).rstrip("/") or "/"
+        if not DIR_NAME_RE.fullmatch(value):
+            raise SlurpyError(
+                f'--{key} "{value}" contains unsupported characters. use '
+                "letters, digits, dots, dashes, underscores, and slashes"
+            )
+        return value
+
+    outdir = resolve_dir(args.outdir, software.outdir, "outdir")
+    logdir = resolve_dir(args.logdir, software.logdir, "logdir")
+
     return JobSpec(
         job_name=job_name,
         inputs=inputs,
@@ -1133,6 +1178,8 @@ def resolve_spec(
         archive=software.archive and not args.no_archive,
         launcher=args.launcher or software.launcher,
         program_args=args.program_args or "",
+        outdir=outdir,
+        logdir=logdir,
     )
 
 
@@ -1237,6 +1284,8 @@ _JOB_FILE_STR_KEYS = {
     "launcher": "launcher",
     "variant": "variant",
     "args": "program_args",
+    "outdir": "outdir",
+    "logdir": "logdir",
 }
 _JOB_FILE_BOOL_KEYS = {
     "no_archive": "no_archive",
@@ -1276,6 +1325,8 @@ JOB_TEMPLATE = """\
 # after = "12345"              # afterok shorthand, numeric ids
 # launcher = "python3"         # exec-style tasks
 # variant = "dev"              # use <task>-dev.toml
+# outdir = "out"               # output directory
+# logdir = "log"               # slurm log directory
 # args = "--opt --gfn 2"       # program arguments ({args} configs)
 # no_archive = true
 # inject_resources = true
@@ -1399,6 +1450,8 @@ def _job_record_text(
         ("dependency", spec.dependency),
         ("launcher", spec.launcher),
         ("args", spec.program_args or None),
+        ("outdir", spec.outdir),
+        ("logdir", spec.logdir),
     )
     for key, value in optional:
         if value:
@@ -1433,11 +1486,11 @@ def record_submission(
     """
     Write the submission as a job file and return its path.
 
-    With --record the file is a commented, visible job file. Otherwise a
-    minimal record goes to output/.record/, oldest pruned at the limit.
+    With --record the file is a commented, visible job file. A minimal
+    record always goes to <outdir>/.rec/, oldest pruned at the limit.
     """
     now = datetime.datetime.now()
-    record_dir = Path("output") / ".record"
+    record_dir = Path(spec.outdir) / RECORD_SUBDIR
     record_dir.mkdir(parents=True, exist_ok=True)
     existing = sorted(record_dir.glob("*.slpy"))
     while len(existing) >= site.record_limit:
@@ -1480,7 +1533,7 @@ def _next_backup_path(backup_dir: Path, name: str) -> Path:
 def backup_existing_outputs(
     output_dir: Path, stems: Sequence[str], stream: TextIO | None = None
 ) -> None:
-    """Move existing output/<stem>.* files into output/backup/, numbered up."""
+    """Move existing <outdir>/<stem>.* files into <outdir>/backup/, numbered up."""
     backup_dir = output_dir / "backup"
     for stem in sorted(set(stems)):
         for path in sorted(output_dir.glob(f"{stem}.*")):
@@ -1490,6 +1543,23 @@ def backup_existing_outputs(
             destination = _next_backup_path(backup_dir, path.name)
             path.rename(destination)
             print(f"backup: {path} -> {destination}", file=stream or sys.stdout)
+
+
+def backup_existing_logs(
+    log_dir: Path, job_name: str, stream: TextIO | None = None
+) -> None:
+    """Move the job's old slurm logs into <logdir>/backup/, numbered up."""
+    backup_dir = log_dir / "backup"
+    candidates = sorted(log_dir.glob(f"{job_name}.log")) + sorted(
+        log_dir.glob(f"{job_name}_*.log")
+    )
+    for path in candidates:
+        if not path.is_file():
+            continue
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        destination = _next_backup_path(backup_dir, path.name)
+        path.rename(destination)
+        print(f"backup: {path} -> {destination}", file=stream or sys.stdout)
 
 
 def write_manifest(
@@ -2165,7 +2235,7 @@ SACCT_ID_RE = re.compile(r"(\d+)(?:_(\d+|\[[^\]]+\]))?")
 
 @dataclass(frozen=True)
 class SubmissionRecord:
-    """One auto-recorded submission from output/.record/."""
+    """One auto-recorded submission from a .rec/ record store."""
 
     path: Path
     job_id: str
@@ -2185,34 +2255,61 @@ class SubmissionRecord:
         return []
 
 
-def load_submission_records() -> list[SubmissionRecord]:
-    """Read the project's submission ledger, oldest first."""
-    record_dir = Path("output") / ".record"
-    if not record_dir.is_dir():
-        raise SlurpyError(
-            "no output/.record/ found here. status works in a directory "
-            "slurpy has submitted from"
-        )
-    records: list[SubmissionRecord] = []
-    for path in sorted(record_dir.glob("*.slpy")):
-        match = RECORD_NAME_RE.fullmatch(path.name)
-        if not match:
-            continue
-        stamp = datetime.datetime.strptime(match.group(1), "%Y-%m-%d-%H-%M-%S")
-        records.append(
-            SubmissionRecord(
-                path=path,
-                job_id=match.group(2),
-                stamp=stamp,
-                data=_load_toml(path),
+def _record_stores(site: SiteDefaults, directory: str | None) -> list[Path]:
+    """
+    Record stores to read: <dir>/.rec with --dir, otherwise the site
+    outdir plus every immediate subdirectory holding a .rec/.
+    """
+    if directory is not None:
+        store = Path(directory).expanduser() / RECORD_SUBDIR
+        if not store.is_dir():
+            raise SlurpyError(
+                f"no {store} found. --dir must name an output directory "
+                "slurpy has submitted to"
             )
+        return [store]
+    stores = []
+    default = Path(site.outdir) / RECORD_SUBDIR
+    if default.is_dir():
+        stores.append(default)
+    for child in sorted(Path(".").iterdir()):
+        candidate = child / RECORD_SUBDIR
+        if candidate.is_dir() and candidate != default:
+            stores.append(candidate)
+    if not stores:
+        raise SlurpyError(
+            f"no {RECORD_SUBDIR}/ record stores found here. status works "
+            "in a directory slurpy has submitted from, or on one given "
+            "with --dir"
         )
+    return stores
+
+
+def load_submission_records(
+    site: SiteDefaults, directory: str | None = None
+) -> list[SubmissionRecord]:
+    """Read the project's submission ledger, oldest first."""
+    records: list[SubmissionRecord] = []
+    for store in _record_stores(site, directory):
+        for path in sorted(store.glob("*.slpy")):
+            match = RECORD_NAME_RE.fullmatch(path.name)
+            if not match:
+                continue
+            stamp = datetime.datetime.strptime(match.group(1), "%Y-%m-%d-%H-%M-%S")
+            records.append(
+                SubmissionRecord(
+                    path=path,
+                    job_id=match.group(2),
+                    stamp=stamp,
+                    data=_load_toml(path),
+                )
+            )
     if not records:
         raise SlurpyError(
-            "output/.record/ holds no submission records. status works in "
-            "a directory slurpy has submitted from"
+            "the record stores hold no submission records. status works "
+            "in a directory slurpy has submitted from"
         )
-    return records
+    return sorted(records, key=lambda record: record.stamp)
 
 
 def _expand_task_ids(token: str) -> list[int]:
@@ -2369,10 +2466,17 @@ def cmd_status(argv: Sequence[str]) -> int:
         action="store_true",
         help="write rerun-<jobid>.slpy files for failed tasks",
     )
+    parser.add_argument(
+        "--dir",
+        dest="directory",
+        metavar="DIR",
+        help="read records from DIR/.rec instead of scanning here",
+    )
     _add_record_flag(parser)
     args = parser.parse_args(list(argv))
 
-    records = load_submission_records()
+    site = load_site_defaults(resolve_search_path())
+    records = load_submission_records(site, args.directory)
     ids = {token for token in args.selectors if token.isdigit()}
     windows = [
         delta for token in args.selectors if (delta := parse_window(token)) is not None
@@ -2484,6 +2588,22 @@ def build_submit_parser(software_name: str) -> argparse.ArgumentParser:
     )
     parser.add_argument("-t", "--time", help="time limit, e.g. 1-00:00:00")
     parser.add_argument("-p", "--partition")
+    parser.add_argument(
+        "-o",
+        "--out",
+        "--outdir",
+        dest="outdir",
+        metavar="DIR",
+        help="output directory (default out/)",
+    )
+    parser.add_argument(
+        "-l",
+        "--log",
+        "--logdir",
+        dest="logdir",
+        metavar="DIR",
+        help="slurm log directory (default log/)",
+    )
     parser.add_argument("-j", "--job-name")
     parser.add_argument("--gpu", type=_positive_int, help="gpus per node")
     parser.add_argument("--account")
@@ -2627,10 +2747,14 @@ def cmd_submit(software_name: str, argv: Sequence[str]) -> int:
         return 0
 
     info = sys.stderr if args.parsable else sys.stdout
-    output_dir = Path("output")
-    output_dir.mkdir(exist_ok=True)
+    output_dir = Path(spec.outdir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    log_dir = Path(spec.logdir)
+    # slurm drops logs silently when the log directory is missing.
+    log_dir.mkdir(parents=True, exist_ok=True)
     with _submission_lock(output_dir):
         backup_existing_outputs(output_dir, spec.stems, stream=info)
+        backup_existing_logs(log_dir, spec.job_name, stream=info)
         if spec.array:
             write_manifest(
                 Path(manifest_name(spec.job_name)), spec.inputs, spec.secondaries
@@ -2872,10 +2996,13 @@ ntasks = 1
 nodes = 1
 throttle = 5
 scratch_base = "/scratch"
+# where results and slurm logs land, per submission directory.
+# outdir = "out"
+# logdir = "log"
 # reject jobs above these limits before they reach slurm.
 # max_cpus = 64
 # max_memory_gb = 500
-# auto-recorded job files kept in output/.record/ before pruning.
+# auto-recorded job files kept in <outdir>/.rec/ before pruning.
 # record_limit = 1000
 
 # partitions shown by "slurpy p", detected and kept current by
@@ -2943,12 +3070,16 @@ export OMP_NUM_THREADS={cpus}
 command = '"{my_program}" "{input}" > "{output_dir}/{stem}.out"'
 # run inside a per-job scratch directory and clean it up afterwards.
 scratch = false
-# tar the scratch directory into output/<stem>.tar.xz when done.
+# tar the scratch directory into <outdir>/<stem>.tar.xz when done.
 archive = false
-# file extensions copied back from scratch to output/.
+# file extensions copied back from scratch to <outdir>/.
 retrieve = []
 # default program for {launcher}, overridable with --launcher.
 # launcher = "bash"
+# per-task output and slurm log directories, override the site defaults
+# and are overridden by --outdir and --logdir.
+# outdir = "out"
+# logdir = "log"
 
 # [slurm]
 # exclude nodes, either inline or from a file with one node per line.

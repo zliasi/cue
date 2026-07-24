@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=h2o
-#SBATCH --output=output/%x.log
+#SBATCH --output=log/%x.log
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
@@ -19,7 +19,7 @@ set -euo pipefail
 input_path="h2o.inp"
 stem="h2o"
 
-mkdir -p output
+mkdir -p "out" "log"
 
 scratch="/scratch/$SLURM_JOB_ID"
 mkdir -p "$scratch"
@@ -34,16 +34,16 @@ cp "$input_path" "$scratch/"
 cd "$scratch"
 input="$(basename "$input_path")"
 
-"/opt/orca/orca" "$input" > "$SLURM_SUBMIT_DIR/output/$stem.out"
+"/opt/orca/orca" "$input" > "$SLURM_SUBMIT_DIR/out/$stem.out"
 
 for ext in gbw xyz; do
   if [[ -f "$stem.$ext" ]]; then
-    cp "$stem.$ext" "$SLURM_SUBMIT_DIR/output/"
+    cp "$stem.$ext" "$SLURM_SUBMIT_DIR/out/"
   fi
 done
 
 cd "$SLURM_SUBMIT_DIR"
-tar -cJf "output/$stem.tar.xz" -C "$scratch" .
+tar -cJf "out/$stem.tar.xz" -C "$scratch" .
 rm -rf "$scratch"
 
 sleep 2

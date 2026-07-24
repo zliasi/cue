@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=mol
-#SBATCH --output=output/%x.log
+#SBATCH --output=log/%x.log
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
@@ -13,7 +13,7 @@ set -euo pipefail
 input_path="mol.xyz"
 stem="mol"
 
-mkdir -p output
+mkdir -p "out" "log"
 
 scratch="/scratch/$SLURM_JOB_ID"
 mkdir -p "$scratch"
@@ -28,10 +28,10 @@ cp "$input_path" "$scratch/"
 cd "$scratch"
 input="$(basename "$input_path")"
 
-"/opt/xtb/bin/xtb" "$input" --opt --gfn 2 --chrg 1 > "$SLURM_SUBMIT_DIR/output/$stem.out"
+"/opt/xtb/bin/xtb" "$input" --opt --gfn 2 --chrg 1 > "$SLURM_SUBMIT_DIR/out/$stem.out"
 
 cd "$SLURM_SUBMIT_DIR"
-tar -cJf "output/$stem.tar.xz" -C "$scratch" .
+tar -cJf "out/$stem.tar.xz" -C "$scratch" .
 rm -rf "$scratch"
 
 sleep 2

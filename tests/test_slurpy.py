@@ -488,7 +488,7 @@ class JobFileTests(TempCwdTestCase):
         self.touch("mol.xyz")
         code, _, stderr = run_slurpy(["xtb", "mol.xyz", "-c", "4"])
         self.assertEqual(code, 0, stderr)
-        records = list(Path("output/.record").glob("*-321.slpy"))
+        records = list(Path("out/.rec").glob("*-321.slpy"))
         self.assertEqual(len(records), 1)
         content = records[0].read_text()
         self.assertNotIn("#", content)
@@ -506,7 +506,7 @@ class JobFileTests(TempCwdTestCase):
         (config / "software" / "exec.toml").write_text(
             "[execution]\ncommand = 'bash \"{input}\"'\n"
         )
-        record_dir = Path("output/.record")
+        record_dir = Path("out/.rec")
         record_dir.mkdir(parents=True)
         (record_dir / "2000-01-01-00-00-00-1.slpy").write_text("")
         (record_dir / "2000-01-02-00-00-00-2.slpy").write_text("")
@@ -523,7 +523,7 @@ class JobFileTests(TempCwdTestCase):
         self.touch("mol.xyz")
         code, stdout, stderr = run_slurpy(["xtb", "mol.xyz", "--record"])
         self.assertEqual(code, 0, stderr)
-        self.assertEqual(len(list(Path("output/.record").glob("*.slpy"))), 1)
+        self.assertEqual(len(list(Path("out/.rec").glob("*.slpy"))), 1)
         visible = list(Path(".").glob("slurpy-xtb-mol-*.slpy"))
         self.assertEqual(len(visible), 1)
         content = visible[0].read_text()
@@ -668,13 +668,100 @@ class AfterParsableTests(TempCwdTestCase):
     def test_parsable_prints_only_id(self) -> None:
         self._fake_sbatch()
         self.touch("mol.xyz")
-        Path("output").mkdir()
-        Path("output/mol.out").write_text("old")
+        Path("out").mkdir()
+        Path("out/mol.out").write_text("old")
         code, stdout, stderr = run_slurpy(["xtb", "mol.xyz", "--parsable"])
         self.assertEqual(code, 0, stderr)
         self.assertEqual(stdout.strip(), "99")
         self.assertIn("submitted job 99", stderr)
         self.assertIn("backup:", stderr)
+
+
+class OutdirLogdirTests(TempCwdTestCase):
+    def _fake_sbatch(self) -> None:
+        bin_dir = Path("fakebin")
+        bin_dir.mkdir(exist_ok=True)
+        sbatch = bin_dir / "sbatch"
+        sbatch.write_text(
+            "#!/bin/bash\ncat > /dev/null\necho 'Submitted batch job 321'\n"
+        )
+        sbatch.chmod(0o755)
+        patcher = mock.patch.dict(
+            os.environ, {"PATH": f"{bin_dir.resolve()}:{os.environ['PATH']}"}
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_flags_change_directories(self) -> None:
+        self.touch("mol.xyz")
+        code, stdout, stderr = run_slurpy(
+            ["xtb", "mol.xyz", "--outdir", "results", "--logdir", "logs", "--dry-run"]
+        )
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("#SBATCH --output=logs/%x.log", stdout)
+        self.assertIn('mkdir -p "results" "logs"', stdout)
+        self.assertIn('"$SLURM_SUBMIT_DIR/results/$stem.out"', stdout)
+        self.assertIn('tar -cJf "results/$stem.tar.xz"', stdout)
+
+    def test_flag_aliases(self) -> None:
+        self.touch("mol.xyz")
+        for argv in (
+            ["xtb", "mol.xyz", "-o", "r1", "-l", "l1", "--dry-run"],
+            ["xtb", "mol.xyz", "--out", "r1", "--log", "l1", "--dry-run"],
+        ):
+            code, stdout, stderr = run_slurpy(argv)
+            self.assertEqual(code, 0, stderr)
+            self.assertIn("#SBATCH --output=l1/%x.log", stdout)
+            self.assertIn('mkdir -p "r1" "l1"', stdout)
+
+    def test_config_precedence(self) -> None:
+        config = Path("localconfig")
+        (config / "software").mkdir(parents=True)
+        (config / "slurpy.toml").write_text(
+            '[defaults]\noutdir = "siteout"\nlogdir = "sitelog"\n'
+        )
+        (config / "software" / "mytask.toml").write_text(
+            '[execution]\ncommand = \'bash "{input}"\'\noutdir = "taskout"\n'
+        )
+        self.touch("run.sh")
+        env = {slurpy.CONFIG_PATH_ENV: str(config)}
+        with mock.patch.dict(os.environ, env):
+            code, stdout, stderr = run_slurpy(["mytask", "run.sh", "--dry-run"])
+            self.assertEqual(code, 0, stderr)
+            # task config beats site for outdir, site fills logdir.
+            self.assertIn('mkdir -p "taskout" "sitelog"', stdout)
+            code, stdout, stderr = run_slurpy(
+                ["mytask", "run.sh", "--outdir", "cliout", "--dry-run"]
+            )
+            self.assertEqual(code, 0, stderr)
+            self.assertIn('mkdir -p "cliout" "sitelog"', stdout)
+
+    def test_invalid_directory_rejected(self) -> None:
+        self.touch("mol.xyz")
+        code, _, stderr = run_slurpy(
+            ["xtb", "mol.xyz", "--outdir", "bad dir", "--dry-run"]
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("unsupported characters", stderr)
+
+    def test_job_file_outdir(self) -> None:
+        self.touch("mol.xyz")
+        Path("job.slpy").write_text('outdir = "jf"\ninput = ["mol.xyz"]\n')
+        code, stdout, stderr = run_slurpy(["xtb", "-f", "job.slpy", "--dry-run"])
+        self.assertEqual(code, 0, stderr)
+        self.assertIn('mkdir -p "jf" "log"', stdout)
+
+    def test_records_follow_outdir(self) -> None:
+        self._fake_sbatch()
+        self.touch("mol.xyz")
+        code, _, stderr = run_slurpy(["xtb", "mol.xyz", "--outdir", "results"])
+        self.assertEqual(code, 0, stderr)
+        records = list(Path("results/.rec").glob("*-321.slpy"))
+        self.assertEqual(len(records), 1)
+        content = records[0].read_text()
+        self.assertIn("outdir = 'results'", content)
+        self.assertIn("logdir = 'log'", content)
+        self.assertFalse(Path("out/.rec").exists())
 
 
 class ManifestFlagTests(TempCwdTestCase):
@@ -994,14 +1081,14 @@ class SubmitTests(TempCwdTestCase):
             "#!/bin/bash\ncat > submitted.slurm\necho 'Submitted batch job 777'\n"
         )
         self.touch("a.inp", "b.inp")
-        Path("output").mkdir()
-        Path("output/a.out").write_text("old")
+        Path("out").mkdir()
+        Path("out/a.out").write_text("old")
         code, stdout, stderr = run_slurpy(["orca", "a.inp", "b.inp"])
         self.assertEqual(code, 0, stderr)
         self.assertIn("submitted array job 777", stdout)
         self.assertIn("backup:", stdout)
         self.assertEqual(Path(".a.manifest").read_text(), "a.inp\nb.inp\n")
-        self.assertTrue(Path("output/backup/a.out.bck01").is_file())
+        self.assertTrue(Path("out/backup/a.out.bck01").is_file())
         self.assertTrue(Path("submitted.slurm").read_text().startswith("#!/bin/bash"))
 
     def test_sbatch_failure_reported(self) -> None:
@@ -1016,8 +1103,8 @@ class SubmitTests(TempCwdTestCase):
 
     def test_output_path_collision_reported(self) -> None:
         self.touch("a.inp")
-        # a file named output blocks the output directory.
-        Path("output").write_text("")
+        # a file named out blocks the output directory.
+        Path("out").write_text("")
         code, _, stderr = run_slurpy(["orca", "a.inp"])
         self.assertEqual(code, 1)
         self.assertIn("slurpy: error", stderr)

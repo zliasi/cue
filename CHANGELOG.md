@@ -2,6 +2,14 @@
 
 ## unreleased
 
+- configurable output and slurm log directories: -o/--out/--outdir and
+  -l/--log/--logdir flags, outdir/logdir job-file keys, per-task
+  [execution] keys, and site-wide [defaults] keys
+- new default directories: results in out/, slurm logs in log/,
+  auto-records in <outdir>/.rec/ (were output/, output/, output/.record/)
+- status scans every .rec/ store in the working directory and merges
+  them; --dir reads one output directory only
+- old slurm logs are backed up to <logdir>/backup/ before resubmission
 - new task configs: nwchem, psi4, dftbplus, molpro, gromacs, qe, sharc,
   turbomole (+dscf/jobex variants), and a
   python-pyscf environment example
