@@ -355,7 +355,7 @@ class StatusTests(unittest.TestCase):
             f'task = "xtb"\ncpus = 4\nargs = "--opt"\ninput = [{inputs}]\n'
         )
         (record_dir / "2026-07-03-12-00-00-102.cue").write_text(
-            f"task = \"exec\"\ninput = ['{Path('a.xyz').resolve()}']\n"
+            f"task = \"run\"\ninput = ['{Path('a.xyz').resolve()}']\n"
         )
 
     def run_status(self, argv: list[str]) -> tuple[SlurmMock, int, str, str]:
@@ -373,7 +373,7 @@ class StatusTests(unittest.TestCase):
         self.assertIn("1 COMPLETED, 1 FAILED, 2 PENDING, 1 TIMEOUT", stdout)
 
     def test_selector_by_task(self) -> None:
-        _, code, stdout, _ = self.run_status(["status", "exec"])
+        _, code, stdout, _ = self.run_status(["status", "run"])
         self.assertEqual(code, 0)
         self.assertIn("102", stdout)
         self.assertNotIn("101", stdout)
@@ -412,7 +412,7 @@ class StatusTests(unittest.TestCase):
         extra = Path("gpaw-out/.rec")
         extra.mkdir(parents=True)
         (extra / "2026-07-04-13-00-00-103.cue").write_text(
-            f"task = \"exec\"\ninput = ['{Path('a.xyz').resolve()}']\n"
+            f"task = \"run\"\ninput = ['{Path('a.xyz').resolve()}']\n"
         )
         runner, code, stdout, _ = self.run_status(["status"])
         self.assertEqual(code, 0)
@@ -423,7 +423,7 @@ class StatusTests(unittest.TestCase):
         extra = Path("gpaw-out/.rec")
         extra.mkdir(parents=True)
         (extra / "2026-07-04-13-00-00-103.cue").write_text(
-            f"task = \"exec\"\ninput = ['{Path('a.xyz').resolve()}']\n"
+            f"task = \"run\"\ninput = ['{Path('a.xyz').resolve()}']\n"
         )
         runner, code, stdout, _ = self.run_status(["status", "--dir", "gpaw-out"])
         self.assertEqual(code, 0)

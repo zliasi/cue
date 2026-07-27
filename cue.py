@@ -199,7 +199,7 @@ examples:
   cue orca h2o.inp
   cue orca *.inp -c 8 -m 16 -t 1-00:00:00
   cue dalton hf.dal water.mol
-  cue exec analysis.py --launcher python3
+  cue run analysis.py --launcher python3
 
 multiple inputs always become one throttled slurm array, never separate
 jobs. run "cue <task> --help" for all submission options."""
@@ -1319,7 +1319,7 @@ JOB_TEMPLATE = """\
 # mail_user = "me@example.com"
 # dependency = "afterok:12345"
 # after = "12345"              # afterok shorthand, numeric ids
-# launcher = "python3"         # exec-style tasks
+# launcher = "python3"         # run-style tasks
 # variant = "dev"              # use <task>-dev.toml
 # outdir = "out"               # output directory
 # logdir = "log"               # slurm log directory
@@ -2611,7 +2611,7 @@ def build_submit_parser(software_name: str) -> argparse.ArgumentParser:
         help="print only the job id, everything else goes to stderr",
     )
     parser.add_argument(
-        "--launcher", help="program that runs the input (exec-style configs)"
+        "--launcher", help="program that runs the input (run-style configs)"
     )
     parser.add_argument(
         "--variant", help="task variant, uses software/<name>-<variant>.toml"
@@ -2998,10 +2998,10 @@ scratch_base = "/scratch"
 # partitions = ["chem", "compchem"]
 """
 
-INIT_EXEC_TOML = """\
+INIT_RUN_TOML = """\
 # generic runner: submits any script with the given launcher.
-# usage: cue exec job.sh
-#        cue exec analysis.py --launcher python3
+# usage: cue run job.sh
+#        cue run analysis.py --launcher python3
 
 [execution]
 command = '{launcher} "{input}"'
@@ -3128,7 +3128,7 @@ def cmd_init(argv: Sequence[str]) -> int:
         base = Path.cwd() / base
     files = {
         base / "cue.toml": INIT_CUE_TOML,
-        base / "software" / "exec.toml": INIT_EXEC_TOML,
+        base / "software" / "run.toml": INIT_RUN_TOML,
         base / "software" / "example.toml": INIT_EXAMPLE_TOML,
     }
     for path, content in files.items():

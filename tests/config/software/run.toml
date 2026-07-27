@@ -1,4 +1,4 @@
-# fixture exec config for tests.
+# fixture run config for tests.
 
 [execution]
 command = '{launcher} "{input}"'

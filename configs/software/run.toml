@@ -1,6 +1,6 @@
 # generic runner: submits any script with the given launcher.
-# usage: cue exec job.sh
-#        cue exec analysis.py --launcher python3
+# usage: cue run job.sh
+#        cue run analysis.py --launcher python3
 
 [execution]
 command = '{launcher} "{input}"'

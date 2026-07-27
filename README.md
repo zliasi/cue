@@ -45,6 +45,7 @@ paths for your cluster.
 cue orca     [options] input.inp  [input2.inp ...]
 cue gaussian [options] input.com  [input2.com ...]
 cue gpaw     [options] script.py  [script2.py ...]
+cue adf      [options] job.ams    [job2.ams ...]
 cue python   [options] script.py  [script2.py ...]
 cue cfour    [options] input.inp  [input2.inp ...]
 cue dalton   [options] calc.dal geom.mol [geom2.mol ...]
@@ -61,7 +62,7 @@ cue gromacs  [options] topol.tpr  [topol2.tpr ...]
 cue qe       [options] scf.in     [scf2.in ...]
 cue sharc    [options] traj.inp   [traj2.inp ...]
 cue turbomole [options] calc/control [calc2/control ...]
-cue exec     [options] script.sh  [script2.sh ...]
+cue run      [options] script.sh  [script2.sh ...]
 cue int      [options]            # interactive shell on a compute node
 cue list                          # available tasks and config paths
 ```
@@ -107,7 +108,7 @@ Use `-h` for an overview of flags
     --mail-type TYPE        mail event type (END,FAIL)
     --mail-user EMAIL       mail recipient
     --dependency STR        slurm dependency, e.g. afterok:12345
-    --launcher CMD          program that runs the input (exec-style configs)
+    --launcher CMD          program that runs the input (run-style configs)
     --variant NAME          software variant
     --args STRING           extra program arguments, e.g. --args "--opt
                             --gfn 2" (configs with an {args} placeholder)
@@ -288,6 +289,10 @@ retrieves `.chk`; archives the scratch.
 **gpaw** - input `.py`, runs via `mpirun` with `OPENBLAS_NUM_THREADS=1`.
 No scratch.
 
+**adf** - amsterdam modeling suite via the `ams` driver, so ADF, BAND,
+and the other engines all work; MPI via `-n`, suite scratch follows the
+job scratch, `ams.results` lands in the archive.
+
 **dalton** - paired `.dal` + `.mol`, picks the 64-bit integer build above
 16 GB, sets `DALTON_TMPDIR`. `dalton-embedded` for dal files with the
 geometry inside.
@@ -351,7 +356,7 @@ calculation directory, jobs are named after the directory
 writes a one-entry `fdmfile.txt` (the binary takes no arguments), and
 copies new files back. `fdmnes-serial` runs the OpenMP binary.
 
-**exec** - runs any script via a launcher (`bash` by default, override
+**run** - runs any script via a launcher (`bash` by default, override
 with `--launcher python3`). No scratch.
 
 All shipped with placeholder paths, fill in your cluster's locations.

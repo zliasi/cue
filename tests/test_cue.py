@@ -85,13 +85,13 @@ GOLDEN_CASES: list[tuple[str, list[str], list[str]]] = [
         ["a.py", "b.py"],
     ),
     (
-        "exec-single-default",
-        ["exec", "hello.sh", "--dry-run"],
+        "run-single-default",
+        ["run", "hello.sh", "--dry-run"],
         ["hello.sh"],
     ),
     (
-        "exec-launcher",
-        ["exec", "hello.py", "--launcher", "python3", "--dry-run"],
+        "run-launcher",
+        ["run", "hello.py", "--launcher", "python3", "--dry-run"],
         ["hello.py"],
     ),
     (
@@ -261,12 +261,12 @@ class ValidationTests(TempCwdTestCase):
         config = Path("localconfig")
         (config / "software").mkdir(parents=True)
         (config / "cue.toml").write_text("[defaults]\nmax_array_size = 2\n")
-        (config / "software" / "exec.toml").write_text(
+        (config / "software" / "run.toml").write_text(
             "[execution]\ncommand = 'bash \"{input}\"'\n"
         )
         self.touch("a.sh", "b.sh", "c.sh")
         with mock.patch.dict(os.environ, {cue.CONFIG_PATH_ENV: str(config)}):
-            code, _, stderr = run_cue(["exec", "a.sh", "b.sh", "c.sh", "--dry-run"])
+            code, _, stderr = run_cue(["run", "a.sh", "b.sh", "c.sh", "--dry-run"])
         self.assertEqual(code, 1)
         self.assertIn("max_array_size", stderr)
 
@@ -274,12 +274,12 @@ class ValidationTests(TempCwdTestCase):
         config = Path("localconfig")
         (config / "software").mkdir(parents=True)
         (config / "cue.toml").write_text("[defaults]\nmax_cpus = 4\n")
-        (config / "software" / "exec.toml").write_text(
+        (config / "software" / "run.toml").write_text(
             "[execution]\ncommand = 'bash \"{input}\"'\n"
         )
         self.touch("a.sh")
         with mock.patch.dict(os.environ, {cue.CONFIG_PATH_ENV: str(config)}):
-            code, _, stderr = run_cue(["exec", "a.sh", "-c", "8", "--dry-run"])
+            code, _, stderr = run_cue(["run", "a.sh", "-c", "8", "--dry-run"])
         self.assertEqual(code, 1)
         self.assertIn("max_cpus", stderr)
 
@@ -501,7 +501,7 @@ class JobFileTests(TempCwdTestCase):
         config = Path("localconfig")
         (config / "software").mkdir(parents=True)
         (config / "cue.toml").write_text("[defaults]\nrecord_limit = 2\n")
-        (config / "software" / "exec.toml").write_text(
+        (config / "software" / "run.toml").write_text(
             "[execution]\ncommand = 'bash \"{input}\"'\n"
         )
         record_dir = Path("out/.rec")
@@ -510,7 +510,7 @@ class JobFileTests(TempCwdTestCase):
         (record_dir / "2000-01-02-00-00-00-2.cue").write_text("")
         self.touch("a.sh")
         with mock.patch.dict(os.environ, {cue.CONFIG_PATH_ENV: str(config)}):
-            code, _, stderr = run_cue(["exec", "a.sh"])
+            code, _, stderr = run_cue(["run", "a.sh"])
         self.assertEqual(code, 0, stderr)
         names = sorted(p.name for p in record_dir.glob("*.cue"))
         self.assertEqual(len(names), 2)
