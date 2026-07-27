@@ -1,5 +1,5 @@
 # nwchem. set [paths] for your cluster.
-# usage: slurpy nwchem job.nw -n 8
+# usage: cue nwchem job.nw -n 8
 # nwchem takes its per-process heap from the memory directive inside the
 # input file, so set it there (it multiplies across mpi ranks).
 

@@ -1,5 +1,5 @@
 # psi4. usually installed in a conda environment, activate it in setup.
-# usage: slurpy psi4 job.dat -c 4 -m 8
+# usage: cue psi4 job.dat -c 4 -m 8
 # psi4 threads with openmp (-n follows -c) and cleans its own scratch
 # files, which live under PSI_SCRATCH in the job's scratch directory.
 # with --inject-resources the memory line in a staged copy of the input

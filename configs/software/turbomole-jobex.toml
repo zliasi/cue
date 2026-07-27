@@ -1,5 +1,5 @@
 # turbomole, jobex (licensed). set [paths] to your licensed install.
-# usage: slurpy turbomole-jobex benzene/control [naphthalene/control ...]
+# usage: cue turbomole-jobex benzene/control [naphthalene/control ...]
 # a turbomole calculation is a directory prepared with define, holding
 # control, coord, and basis files. the jobex optimization driver runs inside that directory
 # and jobs are named after it (stem = "parent"). results stay in the

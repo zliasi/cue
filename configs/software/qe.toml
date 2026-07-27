@@ -1,6 +1,6 @@
 # quantum espresso, pw.x. set [paths] for your cluster.
-# usage: slurpy qe scf.in -n 16
-#        slurpy qe scf.in --args "-nk 4"
+# usage: cue qe scf.in -n 16
+#        cue qe scf.in --args "-nk 4"
 # pseudopotentials come from ESPRESSO_PSEUDO unless the input's
 # pseudo_dir says otherwise. outdir = './' in &CONTROL keeps the
 # wavefunctions in the job's scratch, which the archive captures.

@@ -1,6 +1,6 @@
 # dalton 2020. copy to a config directory and set [paths].
-# paired inputs: slurpy dalton hf.dal water.mol
-#                slurpy dalton dft.dal a.mol b.mol c.mol   (array of pairs)
+# paired inputs: cue dalton hf.dal water.mol
+#                cue dalton dft.dal a.mol b.mol c.mol   (array of pairs)
 # for dal files with embedded geometry see dalton-embedded.toml.
 
 [software]

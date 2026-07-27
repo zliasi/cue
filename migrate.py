@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Draft a slurpy software config from an old bash submit script.
+Draft a cue software config from an old bash submit script.
 
 Best-effort extraction of paths, environment setup, resource defaults,
 the run command, and scratch/archive/retrieve behavior. The output is a
 starting point, not a finished config: review every value, resolve the
-TODO markers, then verify with "slurpy <name> --dry-run <input>".
+TODO markers, then verify with "cue <name> --dry-run <input>".
 
 Usage: python3 migrate.py OLD-SCRIPT > <name>.toml
 """
@@ -148,7 +148,7 @@ def extract_resources(variables: dict[str, str], text: str) -> dict[str, int | s
 
 
 def placeholderize(text: str, paths: dict[str, str]) -> str:
-    """Rewrite bash variable references as slurpy placeholders."""
+    """Rewrite bash variable references as cue placeholders."""
     replacements = {name: f"{{{name}}}" for name in paths}
     replacements |= {
         "scratch_directory": "{scratch}",
@@ -295,7 +295,7 @@ def convert(text: str, script: Path) -> str:
     lines = [
         f"# drafted by migrate.py from {script.name}. review every value,",
         "# resolve the TODOs, then verify with:",
-        f"#   slurpy {name} --dry-run <input>",
+        f"#   cue {name} --dry-run <input>",
         "",
         "[software]",
     ]
@@ -368,7 +368,7 @@ def main(argv: list[str]) -> int:
     sys.stdout.write(convert(text, script))
     print(
         f"drafted config from {script}. review it, then run "
-        f'"slurpy {guess_name(script)} --dry-run <input>"',
+        f'"cue {guess_name(script)} --dry-run <input>"',
         file=sys.stderr,
     )
     return 0

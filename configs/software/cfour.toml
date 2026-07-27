@@ -1,6 +1,6 @@
 # cfour. copy to a config directory and set [paths].
-# usage: slurpy cfour job.inp
-#        slurpy cfour job.inp --set genbas=~/my/GENBAS
+# usage: cue cfour job.inp
+#        cue cfour job.inp --set genbas=~/my/GENBAS
 # cfour runs from a private copy of its binaries in scratch. the copy is
 # flock-guarded so concurrent array tasks do not race on the install dir.
 

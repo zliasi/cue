@@ -1,7 +1,7 @@
 # pyscf: a python library, not a binary, so this is just the python
 # pattern with the environment activated and memory passed through.
 # copy, point the activation at your pyscf environment, and run:
-#   slurpy python-pyscf calc.py -c 8 -m 16
+#   cue python-pyscf calc.py -c 8 -m 16
 
 [software]
 extensions = [".py"]

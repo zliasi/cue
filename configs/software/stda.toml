@@ -1,6 +1,6 @@
 # stda simplified TD-DFT (grimme-lab, classic binary). molden input from
 # a preceding DFT calculation. see std2.toml for the maintained successor.
-# usage: slurpy stda wfn.molden --args "-ax 0.25 -e 7"
+# usage: cue stda wfn.molden --args "-ax 0.25 -e 7"
 
 [software]
 extensions = [".molden"]

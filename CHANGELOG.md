@@ -25,7 +25,7 @@
   fdmnes, fdmnes-serial, xtb, crest, stda, std2, std2-xtb, censo
 - --set key=value overrides [paths] values per submission
 - --args passes program arguments through the {args} placeholder (xtb)
-- job files: slurpy <task> -f job.slpy, slurpy template, automatic
+- job files: cue <task> -f job.cue, cue template, automatic
   submission records in output/.record/, --record for visible records
 - every submission is auto-recorded, also with --record; limit 1000
 - -M/--manifest input lists, also as the manifest job-file key
@@ -43,7 +43,7 @@
   permission views, hist/history with ranges and monthly usage summaries,
   cancel, hold, release, mod/modify
 - --record writes info command output to a timestamped file
-- partitions key in slurpy.toml, maintained by "slurpy p permission"
+- partitions key in cue.toml, maintained by "cue p permission"
 
 ## 0.1.0
 
@@ -54,7 +54,7 @@
 - dependency passthrough, gpu, account, mail directives
 - per-config node exclusion, optionally limited to one partition
 - output backups counting up to .bck99
-- interactive mode (slurpy int)
+- interactive mode (cue int)
 - init, list, link commands with shorthand symlinks (sorca, ...)
 - config location chooseable with init --dir, remembered via a pointer
 - flat <name>.toml configs found in ~/bin and any search directory

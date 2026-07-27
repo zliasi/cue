@@ -1,4 +1,4 @@
-"""Tests for slurpy: golden dry-run scripts and unit behavior."""
+"""Tests for cue: golden dry-run scripts and unit behavior."""
 
 from __future__ import annotations
 
@@ -15,9 +15,9 @@ from unittest import mock
 TESTS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(TESTS_DIR.parent))
 
-# slurpy is a single file, not an installed package, so the path insert
+# cue is a single file, not an installed package, so the path insert
 # above must run before this import.
-import slurpy  # noqa: E402
+import cue  # noqa: E402
 
 CONFIG_DIR = TESTS_DIR / "config"
 EXPECTED_DIR = TESTS_DIR / "expected"
@@ -152,12 +152,12 @@ GOLDEN_CASES: list[tuple[str, list[str], list[str]]] = [
 ]
 
 
-def run_slurpy(argv: list[str]) -> tuple[int, str, str]:
-    """Run slurpy.main, returning exit code, stdout, and stderr."""
+def run_cue(argv: list[str]) -> tuple[int, str, str]:
+    """Run cue.main, returning exit code, stdout, and stderr."""
     stdout = io.StringIO()
     stderr = io.StringIO()
     with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-        code = slurpy.main(["slurpy", *argv])
+        code = cue.main(["cue", *argv])
     return code, stdout.getvalue(), stderr.getvalue()
 
 
@@ -170,7 +170,7 @@ class TempCwdTestCase(unittest.TestCase):
         self._old_cwd = os.getcwd()
         os.chdir(self._tmp.name)
         self.addCleanup(os.chdir, self._old_cwd)
-        patcher = mock.patch.dict(os.environ, {slurpy.CONFIG_PATH_ENV: str(CONFIG_DIR)})
+        patcher = mock.patch.dict(os.environ, {cue.CONFIG_PATH_ENV: str(CONFIG_DIR)})
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -185,7 +185,7 @@ class GoldenTests(TempCwdTestCase):
         for name, argv, files in GOLDEN_CASES:
             with self.subTest(golden=name):
                 self.touch(*files)
-                code, stdout, stderr = run_slurpy(argv)
+                code, stdout, stderr = run_cue(argv)
                 self.assertEqual(code, 0, stderr)
                 expected = (EXPECTED_DIR / f"{name}.slurm").read_text()
                 self.assertEqual(stdout, expected)
@@ -196,56 +196,56 @@ class ShippedConfigTests(unittest.TestCase):
         software_dir = TESTS_DIR.parent / "configs" / "software"
         for path in sorted(software_dir.glob("*.toml")):
             with self.subTest(config=path.name):
-                software = slurpy.parse_software_config(path, path.stem)
+                software = cue.parse_software_config(path, path.stem)
                 self.assertTrue(software.command)
-                values = {key: "x" for key in slurpy.ENGINE_PLACEHOLDERS}
+                values = {key: "x" for key in cue.ENGINE_PLACEHOLDERS}
                 values.update(software.paths)
                 # unknown placeholders in shipped configs must fail here,
                 # not on a user's first submission.
-                slurpy.substitute(software.setup, values, path.name)
-                slurpy.substitute(software.command, values, path.name)
+                cue.substitute(software.setup, values, path.name)
+                cue.substitute(software.command, values, path.name)
 
 
 class ValidationTests(TempCwdTestCase):
     def test_unknown_software(self) -> None:
-        code, _, stderr = run_slurpy(["orcaa", "h2o.inp"])
+        code, _, stderr = run_cue(["orcaa", "h2o.inp"])
         self.assertEqual(code, 1)
         self.assertIn('unknown task "orcaa"', stderr)
         self.assertIn("orca", stderr)
 
     def test_missing_input(self) -> None:
-        code, _, stderr = run_slurpy(["orca", "h2o.inp", "--dry-run"])
+        code, _, stderr = run_cue(["orca", "h2o.inp", "--dry-run"])
         self.assertEqual(code, 1)
         self.assertIn('"h2o.inp" not found', stderr)
 
     def test_wrong_extension(self) -> None:
         self.touch("h2o.xyz")
-        code, _, stderr = run_slurpy(["orca", "h2o.xyz", "--dry-run"])
+        code, _, stderr = run_cue(["orca", "h2o.xyz", "--dry-run"])
         self.assertEqual(code, 1)
         self.assertIn(".inp", stderr)
 
     def test_duplicate_input(self) -> None:
         self.touch("h2o.inp")
-        code, _, stderr = run_slurpy(["orca", "h2o.inp", "h2o.inp", "--dry-run"])
+        code, _, stderr = run_cue(["orca", "h2o.inp", "h2o.inp", "--dry-run"])
         self.assertEqual(code, 1)
         self.assertIn("more than once", stderr)
 
     def test_invalid_time(self) -> None:
         self.touch("h2o.inp")
-        code, _, stderr = run_slurpy(["orca", "h2o.inp", "-t", "tomorrow", "--dry-run"])
+        code, _, stderr = run_cue(["orca", "h2o.inp", "-t", "tomorrow", "--dry-run"])
         self.assertEqual(code, 1)
         self.assertIn("invalid --time", stderr)
 
     def test_time_formats(self) -> None:
         valid = ["30", "30:00", "12:00:00", "1-12", "1-12:00", "1-12:00:00"]
         for value in valid:
-            self.assertIsNotNone(slurpy.TIME_LIMIT_RE.fullmatch(value), value)
+            self.assertIsNotNone(cue.TIME_LIMIT_RE.fullmatch(value), value)
         invalid = ["", "1:2:3", "one", "1-123", "12:00:00:00"]
         for value in invalid:
-            self.assertIsNone(slurpy.TIME_LIMIT_RE.fullmatch(value), value)
+            self.assertIsNone(cue.TIME_LIMIT_RE.fullmatch(value), value)
 
     def test_invalid_characters(self) -> None:
-        code, _, stderr = run_slurpy(["orca", "h2$o.inp", "--dry-run"])
+        code, _, stderr = run_cue(["orca", "h2$o.inp", "--dry-run"])
         self.assertEqual(code, 1)
         self.assertIn("unsupported characters", stderr)
 
@@ -253,33 +253,33 @@ class ValidationTests(TempCwdTestCase):
         Path("a").mkdir()
         Path("b").mkdir()
         self.touch("a/x.inp", "b/x.inp")
-        code, _, stderr = run_slurpy(["orca", "a/x.inp", "b/x.inp", "--dry-run"])
+        code, _, stderr = run_cue(["orca", "a/x.inp", "b/x.inp", "--dry-run"])
         self.assertEqual(code, 1)
         self.assertIn("both write results", stderr)
 
     def test_max_array_size(self) -> None:
         config = Path("localconfig")
         (config / "software").mkdir(parents=True)
-        (config / "slurpy.toml").write_text("[defaults]\nmax_array_size = 2\n")
+        (config / "cue.toml").write_text("[defaults]\nmax_array_size = 2\n")
         (config / "software" / "exec.toml").write_text(
             "[execution]\ncommand = 'bash \"{input}\"'\n"
         )
         self.touch("a.sh", "b.sh", "c.sh")
-        with mock.patch.dict(os.environ, {slurpy.CONFIG_PATH_ENV: str(config)}):
-            code, _, stderr = run_slurpy(["exec", "a.sh", "b.sh", "c.sh", "--dry-run"])
+        with mock.patch.dict(os.environ, {cue.CONFIG_PATH_ENV: str(config)}):
+            code, _, stderr = run_cue(["exec", "a.sh", "b.sh", "c.sh", "--dry-run"])
         self.assertEqual(code, 1)
         self.assertIn("max_array_size", stderr)
 
     def test_max_cpus(self) -> None:
         config = Path("localconfig")
         (config / "software").mkdir(parents=True)
-        (config / "slurpy.toml").write_text("[defaults]\nmax_cpus = 4\n")
+        (config / "cue.toml").write_text("[defaults]\nmax_cpus = 4\n")
         (config / "software" / "exec.toml").write_text(
             "[execution]\ncommand = 'bash \"{input}\"'\n"
         )
         self.touch("a.sh")
-        with mock.patch.dict(os.environ, {slurpy.CONFIG_PATH_ENV: str(config)}):
-            code, _, stderr = run_slurpy(["exec", "a.sh", "-c", "8", "--dry-run"])
+        with mock.patch.dict(os.environ, {cue.CONFIG_PATH_ENV: str(config)}):
+            code, _, stderr = run_cue(["exec", "a.sh", "-c", "8", "--dry-run"])
         self.assertEqual(code, 1)
         self.assertIn("max_cpus", stderr)
 
@@ -287,7 +287,7 @@ class ValidationTests(TempCwdTestCase):
 class PairedInputTests(TempCwdTestCase):
     def test_alternating_pairs(self) -> None:
         self.touch("a.inp", "a.mol", "b.inp", "b.mol")
-        code, stdout, stderr = run_slurpy(
+        code, stdout, stderr = run_cue(
             ["dirac", "a.inp", "a.mol", "b.inp", "b.mol", "--dry-run"]
         )
         self.assertEqual(code, 0, stderr)
@@ -296,31 +296,31 @@ class PairedInputTests(TempCwdTestCase):
 
     def test_secondary_before_primary(self) -> None:
         self.touch("water.mol", "hf.dal")
-        code, _, stderr = run_slurpy(["dalton", "water.mol", "hf.dal", "--dry-run"])
+        code, _, stderr = run_cue(["dalton", "water.mol", "hf.dal", "--dry-run"])
         self.assertEqual(code, 1)
         self.assertIn("comes before any .dal file", stderr)
 
     def test_primary_without_secondary(self) -> None:
         self.touch("hf.dal")
-        code, _, stderr = run_slurpy(["dalton", "hf.dal", "--dry-run"])
+        code, _, stderr = run_cue(["dalton", "hf.dal", "--dry-run"])
         self.assertEqual(code, 1)
         self.assertIn("has no .mol file", stderr)
 
     def test_trailing_unpaired_primary(self) -> None:
         self.touch("a.dal", "a.mol", "b.dal")
-        code, _, stderr = run_slurpy(["dalton", "a.dal", "a.mol", "b.dal", "--dry-run"])
+        code, _, stderr = run_cue(["dalton", "a.dal", "a.mol", "b.dal", "--dry-run"])
         self.assertEqual(code, 1)
         self.assertIn('"b.dal" has no .mol file', stderr)
 
     def test_duplicate_pair(self) -> None:
         self.touch("a.dal", "a.mol")
-        code, _, stderr = run_slurpy(["dalton", "a.dal", "a.mol", "a.mol", "--dry-run"])
+        code, _, stderr = run_cue(["dalton", "a.dal", "a.mol", "a.mol", "--dry-run"])
         self.assertEqual(code, 1)
         self.assertIn("more than once", stderr)
 
     def test_wrong_extension_in_pairs(self) -> None:
         self.touch("a.dal", "a.xyz")
-        code, _, stderr = run_slurpy(["dalton", "a.dal", "a.xyz", "--dry-run"])
+        code, _, stderr = run_cue(["dalton", "a.dal", "a.xyz", "--dry-run"])
         self.assertEqual(code, 1)
         self.assertIn("secondary extensions", stderr)
 
@@ -336,7 +336,7 @@ class PairedInputTests(TempCwdTestCase):
         with mock.patch.dict(
             os.environ, {"PATH": f"{bin_dir.resolve()}:{os.environ['PATH']}"}
         ):
-            code, _, stderr = run_slurpy(["dalton", "a.dal", "a.mol", "b.mol"])
+            code, _, stderr = run_cue(["dalton", "a.dal", "a.mol", "b.mol"])
         self.assertEqual(code, 0, stderr)
         self.assertEqual(
             Path(".a-a.manifest").read_text(), "a.dal\ta.mol\na.dal\tb.mol\n"
@@ -345,7 +345,7 @@ class PairedInputTests(TempCwdTestCase):
 
 class InjectTests(TempCwdTestCase):
     def submit_dry(self, argv: list[str]) -> tuple[int, str, str]:
-        return run_slurpy([*argv, "--inject-resources", "--dry-run"])
+        return run_cue([*argv, "--inject-resources", "--dry-run"])
 
     def test_orca_replaces_existing_directives(self) -> None:
         Path("h2o.inp").write_text("%pal nprocs 2 end\n%maxcore 1000\n! b3lyp\n")
@@ -359,11 +359,11 @@ class InjectTests(TempCwdTestCase):
         with mock.patch.dict(
             os.environ, {"PATH": f"{bin_dir.resolve()}:{os.environ['PATH']}"}
         ):
-            code, _, stderr = run_slurpy(
+            code, _, stderr = run_cue(
                 ["orca", "h2o.inp", "-c", "4", "-m", "16", "--inject-resources"]
             )
         self.assertEqual(code, 0, stderr)
-        staged = Path(".slurpy-staged/h2o.inp").read_text()
+        staged = Path(".cue-staged/h2o.inp").read_text()
         self.assertIn("%pal nprocs 4 end", staged)
         # 16 GB * 1024 * 0.75 / 4 cores
         self.assertIn("%maxcore 3072", staged)
@@ -375,16 +375,16 @@ class InjectTests(TempCwdTestCase):
         Path("h2o.inp").write_text("! b3lyp def2-svp\n")
         code, stdout, stderr = self.submit_dry(["orca", "h2o.inp", "-c", "2"])
         self.assertEqual(code, 0, stderr)
-        self.assertIn(".slurpy-staged/h2o.inp", stdout)
-        self.assertFalse(Path(".slurpy-staged").exists())
+        self.assertIn(".cue-staged/h2o.inp", stdout)
+        self.assertFalse(Path(".cue-staged").exists())
 
     def test_multiline_pal_block_replaced(self) -> None:
         Path("h2o.inp").write_text("%pal\n  nprocs 8\nend\n! hf\n")
         values = {"cpus": "4", "inject_memory_mb_per_cpu": "1536"}
-        software = slurpy.parse_software_config(
+        software = cue.parse_software_config(
             CONFIG_DIR / "software" / "orca.toml", "orca"
         )
-        result = slurpy.apply_inject_rules(
+        result = cue.apply_inject_rules(
             "%pal\n  nprocs 8\nend\n! hf\n", software, values, "h2o.inp"
         )
         self.assertIn("%pal nprocs 4 end", result)
@@ -396,11 +396,11 @@ class InjectTests(TempCwdTestCase):
             ["gaussian", "h2o.com", "-c", "8", "-m", "16"]
         )
         self.assertEqual(code, 0, stderr)
-        software = slurpy.parse_software_config(
+        software = cue.parse_software_config(
             CONFIG_DIR / "software" / "gaussian.toml", "gaussian"
         )
         values = {"cpus": "8", "inject_memory_mb": "13926"}
-        result = slurpy.apply_inject_rules(
+        result = cue.apply_inject_rules(
             Path("h2o.com").read_text(), software, values, "h2o.com"
         )
         self.assertIn("%nprocshared=8", result)
@@ -438,10 +438,10 @@ class JobFileTests(TempCwdTestCase):
 
     def test_file_settings_applied(self) -> None:
         self.touch("mol.xyz")
-        Path("job.slpy").write_text(
+        Path("job.cue").write_text(
             'cpus = 8\nmemory = 16\nargs = "--opt"\ninput = ["mol.xyz"]\n'
         )
-        code, stdout, stderr = run_slurpy(["xtb", "-f", "job.slpy", "--dry-run"])
+        code, stdout, stderr = run_cue(["xtb", "-f", "job.cue", "--dry-run"])
         self.assertEqual(code, 0, stderr)
         self.assertIn("--cpus-per-task=8", stdout)
         self.assertIn("--mem=16gb", stdout)
@@ -449,52 +449,50 @@ class JobFileTests(TempCwdTestCase):
 
     def test_cli_overrides_file(self) -> None:
         self.touch("mol.xyz")
-        Path("job.slpy").write_text('cpus = 8\ninput = ["mol.xyz"]\n')
-        code, stdout, stderr = run_slurpy(
-            ["xtb", "-f", "job.slpy", "-c", "2", "--dry-run"]
-        )
+        Path("job.cue").write_text('cpus = 8\ninput = ["mol.xyz"]\n')
+        code, stdout, stderr = run_cue(["xtb", "-f", "job.cue", "-c", "2", "--dry-run"])
         self.assertEqual(code, 0, stderr)
         self.assertIn("--cpus-per-task=2", stdout)
 
     def test_file_inputs_relative_to_file(self) -> None:
         self.touch("runs/mol.xyz")
-        Path("runs/job.slpy").write_text('input = ["mol.xyz"]\n')
-        code, stdout, stderr = run_slurpy(["xtb", "-f", "runs/job.slpy", "--dry-run"])
+        Path("runs/job.cue").write_text('input = ["mol.xyz"]\n')
+        code, stdout, stderr = run_cue(["xtb", "-f", "runs/job.cue", "--dry-run"])
         self.assertEqual(code, 0, stderr)
         self.assertIn('input_path="runs/mol.xyz"', stdout)
 
     def test_task_mismatch(self) -> None:
         self.touch("mol.xyz")
-        Path("job.slpy").write_text('task = "orca"\ninput = ["mol.xyz"]\n')
-        code, _, stderr = run_slurpy(["xtb", "-f", "job.slpy", "--dry-run"])
+        Path("job.cue").write_text('task = "orca"\ninput = ["mol.xyz"]\n')
+        code, _, stderr = run_cue(["xtb", "-f", "job.cue", "--dry-run"])
         self.assertEqual(code, 1)
         self.assertIn('job file is for task "orca"', stderr)
 
     def test_unknown_key(self) -> None:
         self.touch("mol.xyz")
-        Path("job.slpy").write_text("cores = 8\n")
-        code, _, stderr = run_slurpy(["xtb", "mol.xyz", "-f", "job.slpy", "--dry-run"])
+        Path("job.cue").write_text("cores = 8\n")
+        code, _, stderr = run_cue(["xtb", "mol.xyz", "-f", "job.cue", "--dry-run"])
         self.assertEqual(code, 1)
         self.assertIn('"cores"', stderr)
 
     def test_no_inputs_anywhere(self) -> None:
-        Path("job.slpy").write_text("cpus = 2\n")
-        code, _, stderr = run_slurpy(["xtb", "-f", "job.slpy", "--dry-run"])
+        Path("job.cue").write_text("cpus = 2\n")
+        code, _, stderr = run_cue(["xtb", "-f", "job.cue", "--dry-run"])
         self.assertEqual(code, 1)
         self.assertIn("no inputs given", stderr)
 
     def test_auto_record_written_and_rerunnable(self) -> None:
         self._install_fake_sbatch()
         self.touch("mol.xyz")
-        code, _, stderr = run_slurpy(["xtb", "mol.xyz", "-c", "4"])
+        code, _, stderr = run_cue(["xtb", "mol.xyz", "-c", "4"])
         self.assertEqual(code, 0, stderr)
-        records = list(Path("out/.rec").glob("*-321.slpy"))
+        records = list(Path("out/.rec").glob("*-321.cue"))
         self.assertEqual(len(records), 1)
         content = records[0].read_text()
         self.assertNotIn("#", content)
         self.assertIn('task = "xtb"', content)
         self.assertIn("cpus = 4", content)
-        code, stdout, stderr = run_slurpy(["xtb", "-f", str(records[0]), "--dry-run"])
+        code, stdout, stderr = run_cue(["xtb", "-f", str(records[0]), "--dry-run"])
         self.assertEqual(code, 0, stderr)
         self.assertIn("--cpus-per-task=4", stdout)
 
@@ -502,47 +500,47 @@ class JobFileTests(TempCwdTestCase):
         self._install_fake_sbatch()
         config = Path("localconfig")
         (config / "software").mkdir(parents=True)
-        (config / "slurpy.toml").write_text("[defaults]\nrecord_limit = 2\n")
+        (config / "cue.toml").write_text("[defaults]\nrecord_limit = 2\n")
         (config / "software" / "exec.toml").write_text(
             "[execution]\ncommand = 'bash \"{input}\"'\n"
         )
         record_dir = Path("out/.rec")
         record_dir.mkdir(parents=True)
-        (record_dir / "2000-01-01-00-00-00-1.slpy").write_text("")
-        (record_dir / "2000-01-02-00-00-00-2.slpy").write_text("")
+        (record_dir / "2000-01-01-00-00-00-1.cue").write_text("")
+        (record_dir / "2000-01-02-00-00-00-2.cue").write_text("")
         self.touch("a.sh")
-        with mock.patch.dict(os.environ, {slurpy.CONFIG_PATH_ENV: str(config)}):
-            code, _, stderr = run_slurpy(["exec", "a.sh"])
+        with mock.patch.dict(os.environ, {cue.CONFIG_PATH_ENV: str(config)}):
+            code, _, stderr = run_cue(["exec", "a.sh"])
         self.assertEqual(code, 0, stderr)
-        names = sorted(p.name for p in record_dir.glob("*.slpy"))
+        names = sorted(p.name for p in record_dir.glob("*.cue"))
         self.assertEqual(len(names), 2)
-        self.assertNotIn("2000-01-01-00-00-00-1.slpy", names)
+        self.assertNotIn("2000-01-01-00-00-00-1.cue", names)
 
     def test_visible_record_adds_to_auto(self) -> None:
         self._install_fake_sbatch()
         self.touch("mol.xyz")
-        code, stdout, stderr = run_slurpy(["xtb", "mol.xyz", "--record"])
+        code, stdout, stderr = run_cue(["xtb", "mol.xyz", "--record"])
         self.assertEqual(code, 0, stderr)
-        self.assertEqual(len(list(Path("out/.rec").glob("*.slpy"))), 1)
-        visible = list(Path(".").glob("slurpy-xtb-mol-*.slpy"))
+        self.assertEqual(len(list(Path("out/.rec").glob("*.cue"))), 1)
+        visible = list(Path(".").glob("cue-xtb-mol-*.cue"))
         self.assertEqual(len(visible), 1)
         content = visible[0].read_text()
-        self.assertIn("# recorded by slurpy", content)
+        self.assertIn("# recorded by cue", content)
         self.assertIn("# job id: 321", content)
 
     def test_record_to_named_file(self) -> None:
         self._install_fake_sbatch()
         self.touch("mol.xyz")
-        code, stdout, stderr = run_slurpy(["xtb", "mol.xyz", "--record", "myrun.slpy"])
+        code, stdout, stderr = run_cue(["xtb", "mol.xyz", "--record", "myrun.cue"])
         self.assertEqual(code, 0, stderr)
-        self.assertIn("recorded: myrun.slpy", stdout)
-        self.assertIn('task = "xtb"', Path("myrun.slpy").read_text())
+        self.assertIn("recorded: myrun.cue", stdout)
+        self.assertIn('task = "xtb"', Path("myrun.cue").read_text())
 
 
 class StemParentTests(TempCwdTestCase):
     def test_stems_from_directories(self) -> None:
         self.touch("benzene/control", "naphthalene/control")
-        code, stdout, stderr = run_slurpy(
+        code, stdout, stderr = run_cue(
             ["turbomole", "benzene/control", "naphthalene/control", "--dry-run"]
         )
         self.assertEqual(code, 0, stderr)
@@ -551,13 +549,13 @@ class StemParentTests(TempCwdTestCase):
 
     def test_bare_input_rejected(self) -> None:
         self.touch("control")
-        code, _, stderr = run_slurpy(["turbomole", "control", "--dry-run"])
+        code, _, stderr = run_cue(["turbomole", "control", "--dry-run"])
         self.assertEqual(code, 1)
         self.assertIn("has no calculation directory", stderr)
 
     def test_same_directory_collides(self) -> None:
         self.touch("benzene/control")
-        code, _, stderr = run_slurpy(
+        code, _, stderr = run_cue(
             ["turbomole", "benzene/control", "benzene/control", "--dry-run"]
         )
         self.assertEqual(code, 1)
@@ -570,8 +568,8 @@ class StemParentTests(TempCwdTestCase):
             '[software]\nstem = "folder"\n[execution]\ncommand = "x"\n'
         )
         self.touch("a/control")
-        with mock.patch.dict(os.environ, {slurpy.CONFIG_PATH_ENV: str(config)}):
-            code, _, stderr = run_slurpy(["bad", "a/control", "--dry-run"])
+        with mock.patch.dict(os.environ, {cue.CONFIG_PATH_ENV: str(config)}):
+            code, _, stderr = run_cue(["bad", "a/control", "--dry-run"])
         self.assertEqual(code, 1)
         self.assertIn('"name" or "parent"', stderr)
 
@@ -584,8 +582,8 @@ class StemParentTests(TempCwdTestCase):
             "{ match = '^%mem', write = \"%mem {inject_memory_mb}\" }]\n"
         )
         self.touch("a/control")
-        with mock.patch.dict(os.environ, {slurpy.CONFIG_PATH_ENV: str(config)}):
-            code, _, stderr = run_slurpy(["bad", "a/control", "--dry-run"])
+        with mock.patch.dict(os.environ, {cue.CONFIG_PATH_ENV: str(config)}):
+            code, _, stderr = run_cue(["bad", "a/control", "--dry-run"])
         self.assertEqual(code, 1)
         self.assertIn("[inject]", stderr)
         self.assertIn("collide", stderr)
@@ -595,11 +593,11 @@ class MemPerCpuTests(TempCwdTestCase):
     def test_mutually_exclusive_with_memory(self) -> None:
         self.touch("mol.xyz")
         with self.assertRaises(SystemExit):
-            run_slurpy(["xtb", "mol.xyz", "-m", "8", "--mem-per-cpu", "2", "--dry-run"])
+            run_cue(["xtb", "mol.xyz", "-m", "8", "--mem-per-cpu", "2", "--dry-run"])
 
     def test_placeholder_uses_total(self) -> None:
         self.touch("hf.dal", "w.mol")
-        code, stdout, stderr = run_slurpy(
+        code, stdout, stderr = run_cue(
             ["dalton", "hf.dal", "w.mol", "-c", "4", "--mem-per-cpu", "3", "--dry-run"]
         )
         self.assertEqual(code, 0, stderr)
@@ -610,10 +608,8 @@ class MemPerCpuTests(TempCwdTestCase):
 
     def test_job_file_conflict(self) -> None:
         self.touch("mol.xyz")
-        Path("job.slpy").write_text(
-            'memory = 8\nmem_per_cpu = 2\ninput = ["mol.xyz"]\n'
-        )
-        code, _, stderr = run_slurpy(["xtb", "-f", "job.slpy", "--dry-run"])
+        Path("job.cue").write_text('memory = 8\nmem_per_cpu = 2\ninput = ["mol.xyz"]\n')
+        code, _, stderr = run_cue(["xtb", "-f", "job.cue", "--dry-run"])
         self.assertEqual(code, 1)
         self.assertIn("both memory and mem_per_cpu", stderr)
 
@@ -635,7 +631,7 @@ class AfterParsableTests(TempCwdTestCase):
 
     def test_after_translates(self) -> None:
         self.touch("mol.xyz")
-        code, stdout, stderr = run_slurpy(
+        code, stdout, stderr = run_cue(
             ["xtb", "mol.xyz", "--after", "11,22", "--dry-run"]
         )
         self.assertEqual(code, 0, stderr)
@@ -643,7 +639,7 @@ class AfterParsableTests(TempCwdTestCase):
 
     def test_after_conflicts_with_dependency(self) -> None:
         self.touch("mol.xyz")
-        code, _, stderr = run_slurpy(
+        code, _, stderr = run_cue(
             [
                 "xtb",
                 "mol.xyz",
@@ -659,9 +655,7 @@ class AfterParsableTests(TempCwdTestCase):
 
     def test_after_rejects_names(self) -> None:
         self.touch("mol.xyz")
-        code, _, stderr = run_slurpy(
-            ["xtb", "mol.xyz", "--after", "myjob", "--dry-run"]
-        )
+        code, _, stderr = run_cue(["xtb", "mol.xyz", "--after", "myjob", "--dry-run"])
         self.assertEqual(code, 1)
         self.assertIn("numeric job ids", stderr)
 
@@ -670,7 +664,7 @@ class AfterParsableTests(TempCwdTestCase):
         self.touch("mol.xyz")
         Path("out").mkdir()
         Path("out/mol.out").write_text("old")
-        code, stdout, stderr = run_slurpy(["xtb", "mol.xyz", "--parsable"])
+        code, stdout, stderr = run_cue(["xtb", "mol.xyz", "--parsable"])
         self.assertEqual(code, 0, stderr)
         self.assertEqual(stdout.strip(), "99")
         self.assertIn("submitted job 99", stderr)
@@ -694,7 +688,7 @@ class OutdirLogdirTests(TempCwdTestCase):
 
     def test_flags_change_directories(self) -> None:
         self.touch("mol.xyz")
-        code, stdout, stderr = run_slurpy(
+        code, stdout, stderr = run_cue(
             ["xtb", "mol.xyz", "--outdir", "results", "--logdir", "logs", "--dry-run"]
         )
         self.assertEqual(code, 0, stderr)
@@ -709,7 +703,7 @@ class OutdirLogdirTests(TempCwdTestCase):
             ["xtb", "mol.xyz", "-o", "r1", "-l", "l1", "--dry-run"],
             ["xtb", "mol.xyz", "--out", "r1", "--log", "l1", "--dry-run"],
         ):
-            code, stdout, stderr = run_slurpy(argv)
+            code, stdout, stderr = run_cue(argv)
             self.assertEqual(code, 0, stderr)
             self.assertIn("#SBATCH --output=l1/%x.log", stdout)
             self.assertIn('mkdir -p "r1" "l1"', stdout)
@@ -717,20 +711,20 @@ class OutdirLogdirTests(TempCwdTestCase):
     def test_config_precedence(self) -> None:
         config = Path("localconfig")
         (config / "software").mkdir(parents=True)
-        (config / "slurpy.toml").write_text(
+        (config / "cue.toml").write_text(
             '[defaults]\noutdir = "siteout"\nlogdir = "sitelog"\n'
         )
         (config / "software" / "mytask.toml").write_text(
             '[execution]\ncommand = \'bash "{input}"\'\noutdir = "taskout"\n'
         )
         self.touch("run.sh")
-        env = {slurpy.CONFIG_PATH_ENV: str(config)}
+        env = {cue.CONFIG_PATH_ENV: str(config)}
         with mock.patch.dict(os.environ, env):
-            code, stdout, stderr = run_slurpy(["mytask", "run.sh", "--dry-run"])
+            code, stdout, stderr = run_cue(["mytask", "run.sh", "--dry-run"])
             self.assertEqual(code, 0, stderr)
             # task config beats site for outdir, site fills logdir.
             self.assertIn('mkdir -p "taskout" "sitelog"', stdout)
-            code, stdout, stderr = run_slurpy(
+            code, stdout, stderr = run_cue(
                 ["mytask", "run.sh", "--outdir", "cliout", "--dry-run"]
             )
             self.assertEqual(code, 0, stderr)
@@ -738,7 +732,7 @@ class OutdirLogdirTests(TempCwdTestCase):
 
     def test_invalid_directory_rejected(self) -> None:
         self.touch("mol.xyz")
-        code, _, stderr = run_slurpy(
+        code, _, stderr = run_cue(
             ["xtb", "mol.xyz", "--outdir", "bad dir", "--dry-run"]
         )
         self.assertEqual(code, 1)
@@ -746,17 +740,17 @@ class OutdirLogdirTests(TempCwdTestCase):
 
     def test_job_file_outdir(self) -> None:
         self.touch("mol.xyz")
-        Path("job.slpy").write_text('outdir = "jf"\ninput = ["mol.xyz"]\n')
-        code, stdout, stderr = run_slurpy(["xtb", "-f", "job.slpy", "--dry-run"])
+        Path("job.cue").write_text('outdir = "jf"\ninput = ["mol.xyz"]\n')
+        code, stdout, stderr = run_cue(["xtb", "-f", "job.cue", "--dry-run"])
         self.assertEqual(code, 0, stderr)
         self.assertIn('mkdir -p "jf" "log"', stdout)
 
     def test_records_follow_outdir(self) -> None:
         self._fake_sbatch()
         self.touch("mol.xyz")
-        code, _, stderr = run_slurpy(["xtb", "mol.xyz", "--outdir", "results"])
+        code, _, stderr = run_cue(["xtb", "mol.xyz", "--outdir", "results"])
         self.assertEqual(code, 0, stderr)
-        records = list(Path("results/.rec").glob("*-321.slpy"))
+        records = list(Path("results/.rec").glob("*-321.cue"))
         self.assertEqual(len(records), 1)
         content = records[0].read_text()
         self.assertIn("outdir = 'results'", content)
@@ -768,35 +762,33 @@ class ManifestFlagTests(TempCwdTestCase):
     def test_manifest_inputs(self) -> None:
         self.touch("runs/a.xyz", "runs/b.xyz")
         Path("runs/list.txt").write_text("# comment\na.xyz\n\nb.xyz\n")
-        code, stdout, stderr = run_slurpy(["xtb", "-M", "runs/list.txt", "--dry-run"])
+        code, stdout, stderr = run_cue(["xtb", "-M", "runs/list.txt", "--dry-run"])
         self.assertEqual(code, 0, stderr)
         self.assertIn("--array=1-2%5", stdout)
 
     def test_manifest_missing(self) -> None:
-        code, _, stderr = run_slurpy(["xtb", "-M", "nope.txt", "--dry-run"])
+        code, _, stderr = run_cue(["xtb", "-M", "nope.txt", "--dry-run"])
         self.assertEqual(code, 1)
         self.assertIn("manifest nope.txt not found", stderr)
 
     def test_manifest_empty(self) -> None:
         Path("list.txt").write_text("# only comments\n")
-        code, _, stderr = run_slurpy(["xtb", "-M", "list.txt", "--dry-run"])
+        code, _, stderr = run_cue(["xtb", "-M", "list.txt", "--dry-run"])
         self.assertEqual(code, 1)
         self.assertIn("lists no input files", stderr)
 
     def test_positionals_and_manifest_concatenate(self) -> None:
         self.touch("a.xyz", "b.xyz")
         Path("list.txt").write_text("b.xyz\n")
-        code, stdout, stderr = run_slurpy(
-            ["xtb", "a.xyz", "-M", "list.txt", "--dry-run"]
-        )
+        code, stdout, stderr = run_cue(["xtb", "a.xyz", "-M", "list.txt", "--dry-run"])
         self.assertEqual(code, 0, stderr)
         self.assertIn("--array=1-2%5", stdout)
 
     def test_manifest_key_in_job_file(self) -> None:
         self.touch("runs/a.xyz")
         Path("runs/list.txt").write_text("a.xyz\n")
-        Path("runs/job.slpy").write_text('manifest = "list.txt"\ncpus = 3\n')
-        code, stdout, stderr = run_slurpy(["xtb", "-f", "runs/job.slpy", "--dry-run"])
+        Path("runs/job.cue").write_text('manifest = "list.txt"\ncpus = 3\n')
+        code, stdout, stderr = run_cue(["xtb", "-f", "runs/job.cue", "--dry-run"])
         self.assertEqual(code, 0, stderr)
         self.assertIn("--cpus-per-task=3", stdout)
         self.assertIn('input_path="runs/a.xyz"', stdout)
@@ -804,29 +796,29 @@ class ManifestFlagTests(TempCwdTestCase):
 
 class TemplateTests(TempCwdTestCase):
     def test_stdout(self) -> None:
-        code, stdout, _ = run_slurpy(["template"])
+        code, stdout, _ = run_cue(["template"])
         self.assertEqual(code, 0)
         self.assertIn("# cpus = 8", stdout)
         self.assertIn("# input = [", stdout)
 
     def test_write_and_refuse_overwrite(self) -> None:
-        code, _, stderr = run_slurpy(["template", "job.slpy"])
+        code, _, stderr = run_cue(["template", "job.cue"])
         self.assertEqual(code, 0, stderr)
-        self.assertTrue(Path("job.slpy").is_file())
-        code, _, stderr = run_slurpy(["template", "job.slpy"])
+        self.assertTrue(Path("job.cue").is_file())
+        code, _, stderr = run_cue(["template", "job.cue"])
         self.assertEqual(code, 1)
         self.assertIn("already exists", stderr)
 
     def test_template_is_valid_toml(self) -> None:
         import tomllib
 
-        self.assertEqual(tomllib.loads(slurpy.JOB_TEMPLATE), {})
+        self.assertEqual(tomllib.loads(cue.JOB_TEMPLATE), {})
 
 
 class ArgsFlagTests(TempCwdTestCase):
     def test_args_substituted(self) -> None:
         self.touch("mol.xyz")
-        code, stdout, stderr = run_slurpy(
+        code, stdout, stderr = run_cue(
             ["xtb", "mol.xyz", "--args", "--opt --chrg 1", "--dry-run"]
         )
         self.assertEqual(code, 0, stderr)
@@ -834,7 +826,7 @@ class ArgsFlagTests(TempCwdTestCase):
 
     def test_args_rejected_without_placeholder(self) -> None:
         self.touch("relax.py")
-        code, _, stderr = run_slurpy(
+        code, _, stderr = run_cue(
             ["gpaw", "relax.py", "--args=--opt --tight", "--dry-run"]
         )
         self.assertEqual(code, 1)
@@ -844,7 +836,7 @@ class ArgsFlagTests(TempCwdTestCase):
 class SetFlagTests(TempCwdTestCase):
     def test_set_overrides_path(self) -> None:
         self.touch("ccsd.inp")
-        code, stdout, stderr = run_slurpy(
+        code, stdout, stderr = run_cue(
             ["cfour", "ccsd.inp", "--set", "genbas=/custom/GENBAS", "--dry-run"]
         )
         self.assertEqual(code, 0, stderr)
@@ -852,7 +844,7 @@ class SetFlagTests(TempCwdTestCase):
 
     def test_set_unknown_key(self) -> None:
         self.touch("ccsd.inp")
-        code, _, stderr = run_slurpy(
+        code, _, stderr = run_cue(
             ["cfour", "ccsd.inp", "--set", "genbass=/x", "--dry-run"]
         )
         self.assertEqual(code, 1)
@@ -861,9 +853,7 @@ class SetFlagTests(TempCwdTestCase):
 
     def test_set_bad_format(self) -> None:
         self.touch("ccsd.inp")
-        code, _, stderr = run_slurpy(
-            ["cfour", "ccsd.inp", "--set", "genbas", "--dry-run"]
-        )
+        code, _, stderr = run_cue(["cfour", "ccsd.inp", "--set", "genbas", "--dry-run"])
         self.assertEqual(code, 1)
         self.assertIn("use --set key=value", stderr)
 
@@ -879,8 +869,8 @@ class ConfigTests(TempCwdTestCase):
     def run_bad(self, body: str) -> str:
         config = self.write_software(body)
         self.touch("a.sh")
-        with mock.patch.dict(os.environ, {slurpy.CONFIG_PATH_ENV: str(config)}):
-            code, _, stderr = run_slurpy(["bad", "a.sh", "--dry-run"])
+        with mock.patch.dict(os.environ, {cue.CONFIG_PATH_ENV: str(config)}):
+            code, _, stderr = run_cue(["bad", "a.sh", "--dry-run"])
         self.assertEqual(code, 1)
         return stderr
 
@@ -917,9 +907,9 @@ class ConfigTests(TempCwdTestCase):
         low = Path("low")
         high.mkdir()
         low.mkdir()
-        (high / "slurpy.toml").write_text("[defaults]\ncpus = 4\n")
-        (low / "slurpy.toml").write_text("[defaults]\ncpus = 2\nmemory_gb = 8\n")
-        site = slurpy.load_site_defaults([high, low])
+        (high / "cue.toml").write_text("[defaults]\ncpus = 4\n")
+        (low / "cue.toml").write_text("[defaults]\ncpus = 2\nmemory_gb = 8\n")
+        site = cue.load_site_defaults([high, low])
         self.assertEqual(site.cpus, 4)
         self.assertEqual(site.memory_gb, 8)
 
@@ -931,7 +921,7 @@ class ConfigTests(TempCwdTestCase):
         (high / "orca.toml").write_text("")
         (low / "orca.toml").write_text("")
         (low / "xtb.toml").write_text("")
-        found = slurpy.discover_software([Path("high"), Path("low")])
+        found = cue.discover_software([Path("high"), Path("low")])
         self.assertEqual(found["orca"], high / "orca.toml")
         self.assertEqual(found["xtb"], low / "xtb.toml")
 
@@ -943,7 +933,7 @@ class BackupTests(TempCwdTestCase):
         for _ in range(3):
             (output / "h2o.out").write_text("data")
             with contextlib.redirect_stdout(io.StringIO()):
-                slurpy.backup_existing_outputs(output, ["h2o"])
+                cue.backup_existing_outputs(output, ["h2o"])
         backups = sorted(p.name for p in (output / "backup").iterdir())
         self.assertEqual(
             backups,
@@ -953,16 +943,16 @@ class BackupTests(TempCwdTestCase):
     def test_backup_full_fails(self) -> None:
         backup_dir = Path("output/backup")
         backup_dir.mkdir(parents=True)
-        for index in range(1, slurpy.MAX_BACKUP_INDEX + 1):
+        for index in range(1, cue.MAX_BACKUP_INDEX + 1):
             (backup_dir / f"h2o.out.bck{index:02d}").write_text("")
-        with self.assertRaises(slurpy.SlurpyError):
-            slurpy._next_backup_path(backup_dir, "h2o.out")
+        with self.assertRaises(cue.CueError):
+            cue._next_backup_path(backup_dir, "h2o.out")
 
 
 class ManifestTests(TempCwdTestCase):
     def test_manifest_content(self) -> None:
         path = Path(".jobs.manifest")
-        slurpy.write_manifest(path, ["a.inp", "b.inp"])
+        cue.write_manifest(path, ["a.inp", "b.inp"])
         self.assertEqual(path.read_text(), "a.inp\nb.inp\n")
         self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
@@ -971,32 +961,32 @@ class SearchPathTests(unittest.TestCase):
     def test_default_dirs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with mock.patch.dict(os.environ, {"HOME": tmp}):
-                os.environ.pop(slurpy.CONFIG_PATH_ENV, None)
-                dirs = slurpy.resolve_search_path()
-        self.assertEqual(dirs, (Path(tmp) / ".config" / "slurpy", Path(tmp) / "bin"))
+                os.environ.pop(cue.CONFIG_PATH_ENV, None)
+                dirs = cue.resolve_search_path()
+        self.assertEqual(dirs, (Path(tmp) / ".config" / "cue", Path(tmp) / "bin"))
 
     def test_configured_search_path_wins(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            config_dir = Path(tmp) / ".config" / "slurpy"
+            config_dir = Path(tmp) / ".config" / "cue"
             config_dir.mkdir(parents=True)
-            (config_dir / "slurpy.toml").write_text('search_path = ["/x", "/y"]\n')
+            (config_dir / "cue.toml").write_text('search_path = ["/x", "/y"]\n')
             with mock.patch.dict(os.environ, {"HOME": tmp}):
-                os.environ.pop(slurpy.CONFIG_PATH_ENV, None)
-                dirs = slurpy.resolve_search_path()
+                os.environ.pop(cue.CONFIG_PATH_ENV, None)
+                dirs = cue.resolve_search_path()
         self.assertEqual(dirs, (Path("/x"), Path("/y")))
 
     def test_env_var_wins(self) -> None:
-        with mock.patch.dict(os.environ, {slurpy.CONFIG_PATH_ENV: "/a:/b"}):
-            dirs = slurpy.resolve_search_path()
+        with mock.patch.dict(os.environ, {cue.CONFIG_PATH_ENV: "/a:/b"}):
+            dirs = cue.resolve_search_path()
         self.assertEqual(dirs, (Path("/a"), Path("/b")))
 
     def test_init_custom_dir_writes_pointer(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with mock.patch.dict(os.environ, {"HOME": tmp}):
-                os.environ.pop(slurpy.CONFIG_PATH_ENV, None)
-                code, _, stderr = run_slurpy(["init", "--dir", f"{tmp}/my-configs"])
+                os.environ.pop(cue.CONFIG_PATH_ENV, None)
+                code, _, stderr = run_cue(["init", "--dir", f"{tmp}/my-configs"])
                 self.assertEqual(code, 0, stderr)
-                dirs = slurpy.resolve_search_path()
+                dirs = cue.resolve_search_path()
         self.assertEqual(dirs, (Path(tmp) / "my-configs",))
 
     def test_flat_toml_in_bin(self) -> None:
@@ -1004,11 +994,11 @@ class SearchPathTests(unittest.TestCase):
             bin_dir = Path(tmp) / "bin"
             bin_dir.mkdir()
             (bin_dir / "orca.toml").write_text("")
-            (bin_dir / "slurpy.toml").write_text("")
-            found = slurpy.discover_software([bin_dir])
+            (bin_dir / "cue.toml").write_text("")
+            found = cue.discover_software([bin_dir])
             self.assertEqual(found, {"orca": bin_dir / "orca.toml"})
             self.assertEqual(
-                slurpy.find_software_config("orca", [bin_dir]),
+                cue.find_software_config("orca", [bin_dir]),
                 bin_dir / "orca.toml",
             )
 
@@ -1016,26 +1006,24 @@ class SearchPathTests(unittest.TestCase):
 class InitTests(TempCwdTestCase):
     def _run_in_home(self, argv: list[str]) -> tuple[int, str, str]:
         with mock.patch.dict(os.environ):
-            os.environ.pop(slurpy.CONFIG_PATH_ENV, None)
+            os.environ.pop(cue.CONFIG_PATH_ENV, None)
             os.environ["HOME"] = os.getcwd()
-            return run_slurpy(argv)
+            return run_cue(argv)
 
     def test_relative_dir_pointer_is_absolute(self) -> None:
         code, _, stderr = self._run_in_home(["init", "--dir", "my-configs"])
         self.assertEqual(code, 0, stderr)
-        bootstrap = Path(".config/slurpy/slurpy.toml")
+        bootstrap = Path(".config/cue/cue.toml")
         self.assertIn(str(Path.cwd() / "my-configs"), bootstrap.read_text())
 
     def test_pointer_note_when_bootstrap_exists(self) -> None:
-        boot_dir = Path(".config/slurpy")
+        boot_dir = Path(".config/cue")
         boot_dir.mkdir(parents=True)
-        (boot_dir / "slurpy.toml").write_text('search_path = ["/x"]\n')
+        (boot_dir / "cue.toml").write_text('search_path = ["/x"]\n')
         code, stdout, stderr = self._run_in_home(["init", "--dir", "other"])
         self.assertEqual(code, 0, stderr)
         self.assertIn(str(Path.cwd() / "other"), stdout)
-        self.assertEqual(
-            (boot_dir / "slurpy.toml").read_text(), 'search_path = ["/x"]\n'
-        )
+        self.assertEqual((boot_dir / "cue.toml").read_text(), 'search_path = ["/x"]\n')
 
 
 class LinkTests(TempCwdTestCase):
@@ -1044,21 +1032,21 @@ class LinkTests(TempCwdTestCase):
         (config / "software").mkdir(parents=True)
         (config / "software" / "orca.toml").write_text("")
         (config / "software" / "list.toml").write_text("")
-        with mock.patch.dict(os.environ, {slurpy.CONFIG_PATH_ENV: str(config)}):
-            code, _, stderr = run_slurpy(["link", "--dir", "bin"])
+        with mock.patch.dict(os.environ, {cue.CONFIG_PATH_ENV: str(config)}):
+            code, _, stderr = run_cue(["link", "--dir", "bin"])
         self.assertEqual(code, 0, stderr)
         bin_dir = Path("bin")
         self.assertTrue((bin_dir / "sorca").is_symlink())
         self.assertTrue((bin_dir / "sint").is_symlink())
         self.assertFalse((bin_dir / "slist").exists())
-        self.assertEqual((bin_dir / "sorca").resolve(), Path(slurpy.__file__).resolve())
+        self.assertEqual((bin_dir / "sorca").resolve(), Path(cue.__file__).resolve())
 
     def test_list_marks_shadowed_config(self) -> None:
         config = Path("cfg")
         (config / "software").mkdir(parents=True)
         (config / "software" / "list.toml").write_text("")
-        with mock.patch.dict(os.environ, {slurpy.CONFIG_PATH_ENV: str(config)}):
-            code, stdout, _ = run_slurpy(["list"])
+        with mock.patch.dict(os.environ, {cue.CONFIG_PATH_ENV: str(config)}):
+            code, stdout, _ = run_cue(["list"])
         self.assertEqual(code, 0)
         self.assertIn("shadowed by the built-in command", stdout)
 
@@ -1083,7 +1071,7 @@ class SubmitTests(TempCwdTestCase):
         self.touch("a.inp", "b.inp")
         Path("out").mkdir()
         Path("out/a.out").write_text("old")
-        code, stdout, stderr = run_slurpy(["orca", "a.inp", "b.inp"])
+        code, stdout, stderr = run_cue(["orca", "a.inp", "b.inp"])
         self.assertEqual(code, 0, stderr)
         self.assertIn("submitted array job 777", stdout)
         self.assertIn("backup:", stdout)
@@ -1096,7 +1084,7 @@ class SubmitTests(TempCwdTestCase):
             "#!/bin/bash\necho 'sbatch: error: boom' >&2\nexit 1\n"
         )
         self.touch("a.inp")
-        code, _, stderr = run_slurpy(["orca", "a.inp"])
+        code, _, stderr = run_cue(["orca", "a.inp"])
         self.assertEqual(code, 1)
         self.assertIn("sbatch failed", stderr)
         self.assertIn("boom", stderr)
@@ -1105,9 +1093,9 @@ class SubmitTests(TempCwdTestCase):
         self.touch("a.inp")
         # a file named out blocks the output directory.
         Path("out").write_text("")
-        code, _, stderr = run_slurpy(["orca", "a.inp"])
+        code, _, stderr = run_cue(["orca", "a.inp"])
         self.assertEqual(code, 1)
-        self.assertIn("slurpy: error", stderr)
+        self.assertIn("cue: error", stderr)
 
 
 class SallocTests(unittest.TestCase):
@@ -1120,8 +1108,8 @@ class SallocTests(unittest.TestCase):
             time="2:00:00",
             partition=None,
         )
-        site = slurpy.SiteDefaults(partition="chem")
-        command = slurpy.build_salloc_command(args, site, "/bin/zsh")
+        site = cue.SiteDefaults(partition="chem")
+        command = cue.build_salloc_command(args, site, "/bin/zsh")
         self.assertEqual(
             command,
             [
@@ -1151,15 +1139,15 @@ class DispatchTests(unittest.TestCase):
             "orca": "orca",
         }
         for program, expected in cases.items():
-            command, rest = slurpy.split_command([program, "x.inp"])
+            command, rest = cue.split_command([program, "x.inp"])
             self.assertEqual(command, expected)
             self.assertEqual(rest, ["x.inp"])
 
     def test_plain_invocation(self) -> None:
-        command, rest = slurpy.split_command(["slurpy", "orca", "x.inp"])
+        command, rest = cue.split_command(["cue", "orca", "x.inp"])
         self.assertEqual(command, "orca")
         self.assertEqual(rest, ["x.inp"])
-        command, rest = slurpy.split_command(["slurpy"])
+        command, rest = cue.split_command(["cue"])
         self.assertIsNone(command)
 
 

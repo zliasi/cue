@@ -1,7 +1,7 @@
 # molpro (licensed). set [paths] to your cluster's licensed install.
-# usage: slurpy molpro job.inp -n 8
+# usage: cue molpro job.inp -n 8
 # the molpro driver launches its own mpi processes, so it is NOT wrapped
-# in mpirun: -n follows slurpy's -n. memory is set in the input (memory
+# in mpirun: -n follows cue's -n. memory is set in the input (memory
 # card, per process).
 
 [software]

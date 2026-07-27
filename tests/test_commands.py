@@ -12,10 +12,10 @@ from unittest import mock
 TESTS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(TESTS_DIR.parent))
 
-# slurpy is a single file, not an installed package, so the path insert
+# cue is a single file, not an installed package, so the path insert
 # above must run before this import.
-import slurpy  # noqa: E402
-import test_slurpy  # noqa: E402
+import cue  # noqa: E402
+import test_cue  # noqa: E402
 
 SACCT_SAMPLE = "\n".join(
     [
@@ -46,8 +46,8 @@ class CommandTestCase(unittest.TestCase):
         self, argv: list[str], output: str = ""
     ) -> tuple[SlurmMock, int, str, str]:
         runner = SlurmMock(output)
-        with mock.patch.object(slurpy, "_run_slurm", runner):
-            code, stdout, stderr = test_slurpy.run_slurpy(argv)
+        with mock.patch.object(cue, "_run_slurm", runner):
+            code, stdout, stderr = test_cue.run_cue(argv)
         return runner, code, stdout, stderr
 
 
@@ -106,11 +106,11 @@ class QueueTests(CommandTestCase):
                     ["q", "--record"], "QUEUE OUTPUT\n"
                 )
                 self.assertEqual(code, 0, stderr)
-                written = list(Path(".").glob("slurpy-queue-*.txt"))
+                written = list(Path(".").glob("cue-queue-*.txt"))
                 self.assertEqual(len(written), 1)
                 content = written[0].read_text()
                 self.assertIn("QUEUE OUTPUT", content)
-                self.assertIn("# slurpy queue", content)
+                self.assertIn("# cue queue", content)
             finally:
                 os.chdir(old_cwd)
 
@@ -126,7 +126,7 @@ class PartitionTests(CommandTestCase):
     def test_up_view_uses_availability_format(self) -> None:
         runner, code, _, _ = self.run_with_mock(["p", "up"])
         self.assertEqual(code, 0)
-        self.assertIn(slurpy.PARTITION_UP_FORMAT, runner.calls[0])
+        self.assertIn(cue.PARTITION_UP_FORMAT, runner.calls[0])
 
     def test_permission_updates_toml(self) -> None:
         outputs = {
@@ -143,12 +143,12 @@ class PartitionTests(CommandTestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             with mock.patch.dict(os.environ, {"HOME": tmp}):
-                with mock.patch.object(slurpy, "_run_slurm", fake_run):
-                    code, stdout, stderr = test_slurpy.run_slurpy(["p", "permission"])
+                with mock.patch.object(cue, "_run_slurm", fake_run):
+                    code, stdout, stderr = test_cue.run_cue(["p", "permission"])
                 self.assertEqual(code, 0, stderr)
                 self.assertIn("chem", stdout)
                 self.assertNotIn("closed", stdout)
-                config = Path(tmp) / ".config" / "slurpy" / "slurpy.toml"
+                config = Path(tmp) / ".config" / "cue" / "cue.toml"
                 self.assertIn('partitions = ["chem", "open"]', config.read_text())
 
 
@@ -161,15 +161,15 @@ class CompletionTests(unittest.TestCase):
         self.addCleanup(os.chdir, self._old_cwd)
         bin_dir = Path("bin").resolve()
         bin_dir.mkdir()
-        slurpy_path = Path(slurpy.__file__).resolve()
-        wrapper = bin_dir / "slurpy"
-        wrapper.write_text(f'#!/bin/bash\nexec python3 "{slurpy_path}" "$@"\n')
+        cue_path = Path(cue.__file__).resolve()
+        wrapper = bin_dir / "cue"
+        wrapper.write_text(f'#!/bin/bash\nexec python3 "{cue_path}" "$@"\n')
         wrapper.chmod(0o755)
         self._env = {
             "PATH": f"{bin_dir}:{os.environ['PATH']}",
-            slurpy.CONFIG_PATH_ENV: str(test_slurpy.CONFIG_DIR),
+            cue.CONFIG_PATH_ENV: str(test_cue.CONFIG_DIR),
         }
-        code, stdout, stderr = test_slurpy.run_slurpy(["completion"])
+        code, stdout, stderr = test_cue.run_cue(["completion"])
         assert code == 0, stderr
         Path("comp.sh").write_text(stdout)
 
@@ -186,7 +186,7 @@ class CompletionTests(unittest.TestCase):
 
     def test_first_word_completes_tasks_and_commands(self) -> None:
         out = self._bash(
-            'COMP_WORDS=(slurpy ""); COMP_CWORD=1; _slurpy_complete; '
+            'COMP_WORDS=(cue ""); COMP_CWORD=1; _cue_complete; '
             'printf "%s\\n" "${COMPREPLY[@]}"'
         )
         self.assertIn("orca", out.split())
@@ -194,14 +194,14 @@ class CompletionTests(unittest.TestCase):
 
     def test_flag_completion(self) -> None:
         out = self._bash(
-            'COMP_WORDS=(slurpy xtb "--ar"); COMP_CWORD=2; _slurpy_complete; '
+            'COMP_WORDS=(cue xtb "--ar"); COMP_CWORD=2; _cue_complete; '
             'printf "%s\\n" "${COMPREPLY[@]}"'
         )
         self.assertIn("--args", out.split())
 
     def test_aliases_defined_with_guard(self) -> None:
         out = self._bash("alias sxtb")
-        self.assertIn("slurpy xtb", out)
+        self.assertIn("cue xtb", out)
         guarded = self._bash("")
         self.assertEqual(guarded, "")
         # a pre-existing alias wins over the generated one.
@@ -221,7 +221,7 @@ class CompletionTests(unittest.TestCase):
         self.assertIn("echo mine", result.stdout)
 
     def test_no_aliases_flag(self) -> None:
-        code, stdout, _ = test_slurpy.run_slurpy(["completion", "--no-aliases"])
+        code, stdout, _ = test_cue.run_cue(["completion", "--no-aliases"])
         self.assertEqual(code, 0)
         self.assertNotIn("alias", stdout)
 
@@ -246,17 +246,17 @@ class ListModeTests(unittest.TestCase):
         (config / "software" / "broken.toml").write_text(
             "[execution]\nscratch = true\n"
         )
-        patcher = mock.patch.dict(os.environ, {slurpy.CONFIG_PATH_ENV: str(config)})
+        patcher = mock.patch.dict(os.environ, {cue.CONFIG_PATH_ENV: str(config)})
         patcher.start()
         self.addCleanup(patcher.stop)
 
     def test_names_plain(self) -> None:
-        code, stdout, _ = test_slurpy.run_slurpy(["list", "--names"])
+        code, stdout, _ = test_cue.run_cue(["list", "--names"])
         self.assertEqual(code, 0)
         self.assertEqual(stdout.split(), ["broken", "gone", "good"])
 
     def test_check_reports_and_fails(self) -> None:
-        code, stdout, stderr = test_slurpy.run_slurpy(["list", "--check"])
+        code, stdout, stderr = test_cue.run_cue(["list", "--check"])
         self.assertEqual(code, 1)
         self.assertIn("ok", stdout)
         self.assertIn("missing: bin -> /nonexistent/dir", stdout)
@@ -265,11 +265,11 @@ class ListModeTests(unittest.TestCase):
 
     def test_partitions_plain(self) -> None:
         with tempfile.TemporaryDirectory() as home:
-            config_dir = Path(home) / ".config" / "slurpy"
+            config_dir = Path(home) / ".config" / "cue"
             config_dir.mkdir(parents=True)
-            (config_dir / "slurpy.toml").write_text('partitions = ["chem", "kemi6"]\n')
+            (config_dir / "cue.toml").write_text('partitions = ["chem", "kemi6"]\n')
             with mock.patch.dict(os.environ, {"HOME": home}):
-                code, stdout, _ = test_slurpy.run_slurpy(["list", "--partitions"])
+                code, stdout, _ = test_cue.run_cue(["list", "--partitions"])
         self.assertEqual(code, 0)
         self.assertEqual(stdout.split(), ["chem", "kemi6"])
 
@@ -284,8 +284,8 @@ class JobControlTests(CommandTestCase):
 
     def test_cancel_by_name_with_yes(self) -> None:
         runner = SlurmMock("4242 opt\n4243 opt\n")
-        with mock.patch.object(slurpy, "_run_slurm", runner):
-            code, stdout, stderr = test_slurpy.run_slurpy(["cancel", "opt", "--yes"])
+        with mock.patch.object(cue, "_run_slurm", runner):
+            code, stdout, stderr = test_cue.run_cue(["cancel", "opt", "--yes"])
         self.assertEqual(code, 0, stderr)
         self.assertEqual(runner.calls[1][0], "scancel")
         self.assertIn("4242", runner.calls[1])
@@ -336,7 +336,7 @@ class StatusTests(unittest.TestCase):
         os.chdir(self._tmp.name)
         self.addCleanup(os.chdir, self._old_cwd)
         patcher = mock.patch.dict(
-            os.environ, {slurpy.CONFIG_PATH_ENV: str(test_slurpy.CONFIG_DIR)}
+            os.environ, {cue.CONFIG_PATH_ENV: str(test_cue.CONFIG_DIR)}
         )
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -348,20 +348,20 @@ class StatusTests(unittest.TestCase):
             f"'{Path(n).resolve()}'"
             for n in ("a.xyz", "b.xyz", "c.xyz", "d.xyz", "e.xyz")
         )
-        (record_dir / "2026-07-01-10-00-00-100.slpy").write_text(
+        (record_dir / "2026-07-01-10-00-00-100.cue").write_text(
             f"task = \"xtb\"\ncpus = 2\ninput = ['{Path('a.xyz').resolve()}']\n"
         )
-        (record_dir / "2026-07-02-11-00-00-101.slpy").write_text(
+        (record_dir / "2026-07-02-11-00-00-101.cue").write_text(
             f'task = "xtb"\ncpus = 4\nargs = "--opt"\ninput = [{inputs}]\n'
         )
-        (record_dir / "2026-07-03-12-00-00-102.slpy").write_text(
+        (record_dir / "2026-07-03-12-00-00-102.cue").write_text(
             f"task = \"exec\"\ninput = ['{Path('a.xyz').resolve()}']\n"
         )
 
     def run_status(self, argv: list[str]) -> tuple[SlurmMock, int, str, str]:
         runner = SlurmMock(SACCT_STATUS_SAMPLE)
-        with mock.patch.object(slurpy, "_run_slurm", runner):
-            code, stdout, stderr = test_slurpy.run_slurpy(argv)
+        with mock.patch.object(cue, "_run_slurm", runner):
+            code, stdout, stderr = test_cue.run_cue(argv)
         return runner, code, stdout, stderr
 
     def test_status_table(self) -> None:
@@ -387,7 +387,7 @@ class StatusTests(unittest.TestCase):
     def test_rerun_writes_failed_subset(self) -> None:
         _, code, stdout, stderr = self.run_status(["status", "--rerun"])
         self.assertEqual(code, 0, stderr)
-        rerun = Path("rerun-101.slpy")
+        rerun = Path("rerun-101.cue")
         self.assertTrue(rerun.is_file())
         content = rerun.read_text()
         self.assertIn("fail reasons: 1 FAILED, 1 TIMEOUT", content)
@@ -396,13 +396,13 @@ class StatusTests(unittest.TestCase):
         self.assertNotIn("a.xyz'", content.split("input =")[1])
         self.assertIn("args = '--opt'", content)
         self.assertIn("still running or pending, not included", stdout)
-        self.assertTrue(Path("rerun-102.slpy").is_file())
-        self.assertFalse(Path("rerun-100.slpy").exists())
+        self.assertTrue(Path("rerun-102.cue").is_file())
+        self.assertFalse(Path("rerun-100.cue").exists())
 
     def test_rerun_file_resubmits(self) -> None:
         self.run_status(["status", "--rerun"])
-        code, stdout, stderr = test_slurpy.run_slurpy(
-            ["xtb", "-f", "rerun-101.slpy", "--dry-run"]
+        code, stdout, stderr = test_cue.run_cue(
+            ["xtb", "-f", "rerun-101.cue", "--dry-run"]
         )
         self.assertEqual(code, 0, stderr)
         self.assertIn("--array=1-2%5", stdout)
@@ -411,7 +411,7 @@ class StatusTests(unittest.TestCase):
     def test_scans_extra_stores(self) -> None:
         extra = Path("gpaw-out/.rec")
         extra.mkdir(parents=True)
-        (extra / "2026-07-04-13-00-00-103.slpy").write_text(
+        (extra / "2026-07-04-13-00-00-103.cue").write_text(
             f"task = \"exec\"\ninput = ['{Path('a.xyz').resolve()}']\n"
         )
         runner, code, stdout, _ = self.run_status(["status"])
@@ -422,7 +422,7 @@ class StatusTests(unittest.TestCase):
     def test_dir_flag_restricts(self) -> None:
         extra = Path("gpaw-out/.rec")
         extra.mkdir(parents=True)
-        (extra / "2026-07-04-13-00-00-103.slpy").write_text(
+        (extra / "2026-07-04-13-00-00-103.cue").write_text(
             f"task = \"exec\"\ninput = ['{Path('a.xyz').resolve()}']\n"
         )
         runner, code, stdout, _ = self.run_status(["status", "--dir", "gpaw-out"])
@@ -503,15 +503,15 @@ class HistoryTests(CommandTestCase):
         self.assertNotIn("usage over", stdout)
 
     def test_duration_parsing(self) -> None:
-        self.assertEqual(slurpy._duration_seconds("1-01:00:00"), 90000)
-        self.assertEqual(slurpy._duration_seconds("30:00"), 1800)
-        self.assertEqual(slurpy._duration_seconds(""), 0.0)
+        self.assertEqual(cue._duration_seconds("1-01:00:00"), 90000)
+        self.assertEqual(cue._duration_seconds("30:00"), 1800)
+        self.assertEqual(cue._duration_seconds(""), 0.0)
 
     def test_memory_parsing(self) -> None:
-        self.assertEqual(slurpy._memory_mb("16Gn", 4), 16384)
-        self.assertEqual(slurpy._memory_mb("4Gc", 2), 8192)
-        self.assertEqual(slurpy._memory_mb("512M", 1), 512)
-        self.assertEqual(slurpy._memory_mb("1024K", 1), 1)
+        self.assertEqual(cue._memory_mb("16Gn", 4), 16384)
+        self.assertEqual(cue._memory_mb("4Gc", 2), 8192)
+        self.assertEqual(cue._memory_mb("512M", 1), 512)
+        self.assertEqual(cue._memory_mb("1024K", 1), 1)
 
 
 if __name__ == "__main__":

@@ -1,12 +1,12 @@
 # fdmnes x-ray spectroscopy (parallel binary). set [paths] for your cluster.
-# usage: slurpy fdmnes input/CeS8_inp.txt
-#        slurpy fdmnes input/*_inp.txt      (array, one calculation per task)
+# usage: cue fdmnes input/CeS8_inp.txt
+#        cue fdmnes input/*_inp.txt      (array, one calculation per task)
 # pass the calculation inputs themselves, never the fdmfile.txt master
 # list. fdmnes reads a fixed-name fdmfile.txt from its working directory,
 # so each job mirrors the whole submission directory into scratch (keeping
 # relative references like cif files working), writes a one-entry
 # fdmfile.txt, runs, and copies new files back to output/.
-# serial binary: slurpy fdmnes-serial (or slurpy fdmnes --variant serial).
+# serial binary: cue fdmnes-serial (or cue fdmnes --variant serial).
 
 [software]
 extensions = [".txt"]
@@ -30,7 +30,7 @@ module purge
 [execution]
 command = '''
 rm -f "$input"
-rsync -a --exclude=output --exclude=.slurpy-staged --exclude=fdmfile.txt "$SLURM_SUBMIT_DIR/" .
+rsync -a --exclude=output --exclude=.cue-staged --exclude=fdmfile.txt "$SLURM_SUBMIT_DIR/" .
 printf '1\n\n%s\n' "$input_path" > fdmfile.txt
 "{fdmnes_dir}/mpirt/bin/intel64/mpirun" -np {ntasks} "{fdmnes_dir}/fdmnes_mpi_linux64" > "{output_dir}/{stem}.out"
 rsync -a --exclude=fdmfile.txt --exclude=input --exclude=cif --exclude=analysis --exclude=output "$PWD/" "{output_dir}/"

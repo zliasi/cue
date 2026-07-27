@@ -17,10 +17,10 @@ TESTS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(TESTS_DIR.parent))
 sys.path.insert(0, str(TESTS_DIR))
 
-# slurpy is a single file, not an installed package, so the path inserts
+# cue is a single file, not an installed package, so the path inserts
 # above must run before these imports.
-import slurpy  # noqa: E402
-import test_slurpy  # noqa: E402
+import cue  # noqa: E402
+import test_cue  # noqa: E402
 
 
 def main() -> int:
@@ -30,13 +30,13 @@ def main() -> int:
         os.chdir(tmp)
         with mock.patch.dict(
             os.environ,
-            {slurpy.CONFIG_PATH_ENV: str(test_slurpy.CONFIG_DIR)},
+            {cue.CONFIG_PATH_ENV: str(test_cue.CONFIG_DIR)},
         ):
-            for name, argv, files in test_slurpy.GOLDEN_CASES:
+            for name, argv, files in test_cue.GOLDEN_CASES:
                 for file in files:
                     Path(file).parent.mkdir(parents=True, exist_ok=True)
                     Path(file).write_text("")
-                code, stdout, stderr = test_slurpy.run_slurpy(argv)
+                code, stdout, stderr = test_cue.run_cue(argv)
                 if code != 0:
                     print(f"{name}: FAILED\n{stderr}", file=sys.stderr)
                     return 1

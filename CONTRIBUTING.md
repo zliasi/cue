@@ -8,7 +8,7 @@ engine fixes. Adding support for a new software needs no Python at all.
 This is the most useful contribution and works without touching code.
 
 1. Copy `configs/software/example.toml` to `<name>.toml` in one of your
-   config directories (`slurpy list` shows them; `~/bin/<name>.toml` works
+   config directories (`cue list` shows them; `~/bin/<name>.toml` works
    too).
 2. Fill in the paths, module loads, and run command for the software.
    Look at your old submit script: everything it exported or loaded goes in
@@ -18,7 +18,7 @@ This is the most useful contribution and works without touching code.
 3. Test without submitting:
 
    ```
-   slurpy <name> --dry-run input.xyz
+   cue <name> --dry-run input.xyz
    ```
 
    Read the printed script. Compare it against a job script that you know
@@ -30,17 +30,17 @@ This is the most useful contribution and works without touching code.
    maintainer). Keep your working copy with real paths in your own config
    directory.
 
-## Changing the engine (slurpy.py)
+## Changing the engine (cue.py)
 
 Ground rules, in order of importance:
 
-- One file. `slurpy.py` must stay a single, dependency-free Python file
+- One file. `cue.py` must stay a single, dependency-free Python file
   (3.11+, standard library only) so users can install it by copying it.
 - No software knowledge in code. If a change only matters for one software,
-  it belongs in a config file, not in `slurpy.py`.
+  it belongs in a config file, not in `cue.py`.
 - Never break the command line. Existing flags and their meaning are frozen.
   New behavior gets a new flag or a new config key with a safe default.
-- Scope: slurpy submits jobs and provides read-only slurm information
+- Scope: cue submits jobs and provides read-only slurm information
   and job-control commands. No chemistry output parsing and no workflow
   management.
 - Fail loudly and helpfully. Error messages say what to do, not just what
@@ -72,7 +72,7 @@ Workflow:
 
 5. Add or update a test for the change. New validation gets a test that
    triggers the error. New script behavior gets a golden case in
-   `tests/test_slurpy.py` (GOLDEN_CASES). Slurm command behavior is
+   `tests/test_cue.py` (GOLDEN_CASES). Slurm command behavior is
    tested with mocked slurm calls in `tests/test_commands.py`.
 6. Update README.md and CHANGELOG.md if behavior changed.
 7. Open a pull request.
@@ -88,7 +88,7 @@ lines.
   predictable.
 - Config values (`command`, `setup`, `launcher`) are inserted into the job
   script unescaped. The trust boundary is the user's own config files,
-  exactly as with the bash scripts slurpy replaces.
+  exactly as with the bash scripts cue replaces.
 - One file is a hard requirement so users can install by copying; internal
   sections keep responsibilities separate instead of modules.
 
@@ -104,6 +104,6 @@ fix exclude_file whitespace handling
 
 ## Releases
 
-Bump `__version__` in slurpy.py, describe the change in CHANGELOG.md, and
+Bump `__version__` in cue.py, describe the change in CHANGELOG.md, and
 tag. Users update by replacing one file, so never ship a breaking CLI
 change.

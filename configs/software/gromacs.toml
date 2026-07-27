@@ -1,7 +1,7 @@
 # gromacs molecular dynamics. single-node thread build.
-# usage: slurpy gromacs topol.tpr -c 8
-#        slurpy gromacs topol.tpr --gpu 1 -p gpu-partition
-#        slurpy gromacs topol.tpr --args "-cpi topol.cpt"   (continue)
+# usage: cue gromacs topol.tpr -c 8
+#        cue gromacs topol.tpr --gpu 1 -p gpu-partition
+#        cue gromacs topol.tpr --args "-cpi topol.cpt"   (continue)
 # the portable .tpr from gmx grompp is the whole input. -deffnm names
 # every output after the stem, and mdrun auto-detects gpus from the
 # allocation. multi-node runs need the gmx_mpi build and a different

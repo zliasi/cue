@@ -1,6 +1,6 @@
 # dirac. copy to a config directory and set [paths].
-# paired inputs: slurpy dirac sp_hf.inp hgh2.mol
-#                slurpy dirac a.inp a.mol b.inp b.mol   (array of pairs)
+# paired inputs: cue dirac sp_hf.inp hgh2.mol
+#                cue dirac a.inp a.mol b.inp b.mol   (array of pairs)
 
 [software]
 extensions = [".inp"]

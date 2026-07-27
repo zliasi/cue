@@ -12,11 +12,11 @@ from unittest import mock
 TESTS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(TESTS_DIR.parent))
 
-# migrate and slurpy are single files, not an installed package, so the
+# migrate and cue are single files, not an installed package, so the
 # path insert above must run before these imports.
 import migrate  # noqa: E402
-import slurpy  # noqa: E402
-import test_slurpy  # noqa: E402
+import cue  # noqa: E402
+import test_cue  # noqa: E402
 
 OLD_SCRIPT = """\
 #!/bin/bash
@@ -91,7 +91,7 @@ class ConvertTests(unittest.TestCase):
 
 
 class RoundTripTests(unittest.TestCase):
-    def test_draft_config_renders_with_slurpy(self) -> None:
+    def test_draft_config_renders_with_cue(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             old_cwd = os.getcwd()
             os.chdir(tmp)
@@ -103,9 +103,9 @@ class RoundTripTests(unittest.TestCase):
                 )
                 Path("job.inp").write_text("")
                 with mock.patch.dict(
-                    os.environ, {slurpy.CONFIG_PATH_ENV: str(Path("cfg").resolve())}
+                    os.environ, {cue.CONFIG_PATH_ENV: str(Path("cfg").resolve())}
                 ):
-                    code, stdout, stderr = test_slurpy.run_slurpy(
+                    code, stdout, stderr = test_cue.run_cue(
                         ["mine", "job.inp", "--dry-run"]
                     )
             finally:

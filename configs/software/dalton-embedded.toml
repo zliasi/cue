@@ -1,6 +1,6 @@
 # dalton with the geometry embedded in the dal file (no separate .mol).
-# usage: slurpy dalton-embedded hf.dal
-#        slurpy dalton --variant embedded hf.dal
+# usage: cue dalton-embedded hf.dal
+#        cue dalton --variant embedded hf.dal
 
 [software]
 extensions = [".dal"]

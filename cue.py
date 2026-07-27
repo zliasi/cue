@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-slurpy: submit computational chemistry jobs to Slurm.
+cue: submit computational chemistry jobs to Slurm.
 
 Single-file launcher. All software-specific knowledge (executables, module
 loads, scratch policy, retrieved files) lives in TOML config files. This file
@@ -8,8 +8,8 @@ only discovers configs, validates input, renders an sbatch script, and
 submits it.
 
 Minimum setup: this file plus one software config, for example
-~/.config/slurpy/software/orca.toml or a plain ~/bin/orca.toml. Run
-"slurpy init" to scaffold and "slurpy list" to see what is available.
+~/.config/cue/software/orca.toml or a plain ~/bin/orca.toml. Run
+"cue init" to scaffold and "cue list" to see what is available.
 """
 
 from __future__ import annotations
@@ -33,10 +33,10 @@ from typing import TextIO
 
 __version__ = "0.2.0"
 
-CONFIG_PATH_ENV = "SLURPY_CONFIG_PATH"
+CONFIG_PATH_ENV = "CUE_CONFIG_PATH"
 # Fixed bootstrap location. Users pick any config directory they like with
-# "slurpy init --dir"; a pointer written here makes slurpy find it.
-USER_CONFIG_DIR = "~/.config/slurpy"
+# "cue init --dir"; a pointer written here makes cue find it.
+USER_CONFIG_DIR = "~/.config/cue"
 # Searched when no search_path is configured. ~/bin is included because
 # that is where people traditionally keep their per-software submitters.
 DEFAULT_SEARCH_DIRS = (USER_CONFIG_DIR, "~/bin")
@@ -154,58 +154,58 @@ SACCT_LINE = (
 )
 
 HELP_TEXT = f"""\
-slurpy {__version__}: submit computational chemistry jobs to slurm.
+cue {__version__}: submit computational chemistry jobs to slurm.
 
 submit:
-  slurpy <task> [options] <input> [<input> ...]
-  slurpy <task> -f job.slpy          settings and inputs from a job file
-  slurpy <task> -M inputs.txt        inputs from a manifest, one per line
-  slurpy int [options]              interactive shell on a compute node
+  cue <task> [options] <input> [<input> ...]
+  cue <task> -f job.cue          settings and inputs from a job file
+  cue <task> -M inputs.txt        inputs from a manifest, one per line
+  cue int [options]              interactive shell on a compute node
 
 slurm info (--record [FILE] writes the output to a file):
-  slurpy q [ARGS]                   your queue. modifiers stack:
+  cue q [ARGS]                   your queue. modifiers stack:
                                       w watch      p partition ARG
                                       a all users  u user ARG
                                       j job ids or names ARGS
-                                    e.g. slurpy qwp chem, slurpy qj 12345
-  slurpy p [NAME ...]               partition overview (p = partition)
-  slurpy p up                       partition and node availability
-  slurpy p permission               detect and store the partitions you
+                                    e.g. cue qwp chem, cue qj 12345
+  cue p [NAME ...]               partition overview (p = partition)
+  cue p up                       partition and node availability
+  cue p permission               detect and store the partitions you
                                     may use
-  slurpy hist [N | A..B | Xd/Xw/Xm | STATE | ID|NAME ...]
+  cue hist [N | A..B | Xd/Xw/Xm | STATE | ID|NAME ...]
                                     finished jobs, 1 = newest. a bare
                                     window (3d, 1month) gives a usage
                                     summary, failed/timeout/cancelled/
                                     completed filter the table
-  slurpy status [SEL ...] [--rerun] fate of jobs submitted from this
+  cue status [SEL ...] [--rerun] fate of jobs submitted from this
                                     directory, --rerun writes job files
                                     for the failed tasks
 
 job control:
-  slurpy cancel <ID|NAME> ...
-  slurpy hold <ID|NAME> ...         slurpy release <ID|NAME> ...
-  slurpy mod <ID> key=value ...     keys: throttle, nice, time, dependency
+  cue cancel <ID|NAME> ...
+  cue hold <ID|NAME> ...         cue release <ID|NAME> ...
+  cue mod <ID> key=value ...     keys: throttle, nice, time, dependency
 
 setup:
-  slurpy list                       available tasks and config paths
-  slurpy link [--dir DIR]           shorthand symlinks (sorca, sq, ...)
-  slurpy init [--dir DIR]           create a config directory
-  slurpy template [FILE]            print or write a job file template
-  slurpy completion                 bash completion + s<task> aliases,
-                                    install: eval "$(slurpy completion)"
-  slurpy version                    print the version
+  cue list                       available tasks and config paths
+  cue link [--dir DIR]           shorthand symlinks (sorca, sq, ...)
+  cue init [--dir DIR]           create a config directory
+  cue template [FILE]            print or write a job file template
+  cue completion                 bash completion + s<task> aliases,
+                                    install: eval "$(cue completion)"
+  cue version                    print the version
 
 examples:
-  slurpy orca h2o.inp
-  slurpy orca *.inp -c 8 -m 16 -t 1-00:00:00
-  slurpy dalton hf.dal water.mol
-  slurpy exec analysis.py --launcher python3
+  cue orca h2o.inp
+  cue orca *.inp -c 8 -m 16 -t 1-00:00:00
+  cue dalton hf.dal water.mol
+  cue exec analysis.py --launcher python3
 
 multiple inputs always become one throttled slurm array, never separate
-jobs. run "slurpy <task> --help" for all submission options."""
+jobs. run "cue <task> --help" for all submission options."""
 
 
-class SlurpyError(Exception):
+class CueError(Exception):
     """User-facing fatal error whose message says what to do."""
 
 
@@ -215,9 +215,9 @@ def _load_toml(path: Path) -> dict[str, object]:
         with path.open("rb") as handle:
             return tomllib.load(handle)
     except tomllib.TOMLDecodeError as error:
-        raise SlurpyError(f"{path} is not valid TOML: {error}") from error
+        raise CueError(f"{path} is not valid TOML: {error}") from error
     except OSError as error:
-        raise SlurpyError(f"cannot read {path}: {error}") from error
+        raise CueError(f"cannot read {path}: {error}") from error
 
 
 def _check_keys(
@@ -228,7 +228,7 @@ def _check_keys(
 ) -> None:
     unknown = sorted(set(table) - set(allowed))
     if unknown:
-        raise SlurpyError(
+        raise CueError(
             f'unknown key "{unknown[0]}" in {context} of {source}. '
             f"allowed keys: {', '.join(sorted(allowed))}"
         )
@@ -237,7 +237,7 @@ def _check_keys(
 def _get_table(data: Mapping[str, object], key: str, source: Path) -> dict[str, object]:
     value = data.get(key, {})
     if not isinstance(value, dict):
-        raise SlurpyError(f"[{key}] in {source} must be a table")
+        raise CueError(f"[{key}] in {source} must be a table")
     return value
 
 
@@ -248,7 +248,7 @@ def _get_str(
     if value is None:
         return None
     if not isinstance(value, str):
-        raise SlurpyError(f'"{key}" in {context} of {source} must be a string')
+        raise CueError(f'"{key}" in {context} of {source} must be a string')
     return value
 
 
@@ -263,7 +263,7 @@ def _get_bool(
     if value is None:
         return default
     if not isinstance(value, bool):
-        raise SlurpyError(f'"{key}" in {context} of {source} must be true or false')
+        raise CueError(f'"{key}" in {context} of {source} must be true or false')
     return value
 
 
@@ -274,21 +274,19 @@ def _get_str_list(
     if value is None:
         return ()
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-        raise SlurpyError(f'"{key}" in {context} of {source} must be a list of strings')
+        raise CueError(f'"{key}" in {context} of {source} must be a list of strings')
     return tuple(value)
 
 
 def _positive_int_value(value: object, key: str, context: str, source: Path) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-        raise SlurpyError(
-            f'"{key}" in {context} of {source} must be a positive integer'
-        )
+        raise CueError(f'"{key}" in {context} of {source} must be a positive integer')
     return value
 
 
 @dataclass(frozen=True)
 class SiteDefaults:
-    """Site-wide job defaults, layered from slurpy.toml files."""
+    """Site-wide job defaults, layered from cue.toml files."""
 
     partition: str | None = None
     cpus: int = 1
@@ -324,17 +322,17 @@ def resolve_search_path() -> tuple[Path, ...]:
     """
     Return config directories in precedence order.
 
-    The SLURPY_CONFIG_PATH environment variable (colon-separated) wins.
-    Otherwise the search_path key in ~/.config/slurpy/slurpy.toml is used,
-    falling back to ~/.config/slurpy and ~/bin.
+    The CUE_CONFIG_PATH environment variable (colon-separated) wins.
+    Otherwise the search_path key in ~/.config/cue/cue.toml is used,
+    falling back to ~/.config/cue and ~/bin.
     """
     env_value = os.environ.get(CONFIG_PATH_ENV)
     if env_value:
         dirs = tuple(Path(part).expanduser() for part in env_value.split(":") if part)
         if not dirs:
-            raise SlurpyError(f"{CONFIG_PATH_ENV} is set but empty")
+            raise CueError(f"{CONFIG_PATH_ENV} is set but empty")
         return dirs
-    user_config = Path(USER_CONFIG_DIR).expanduser() / "slurpy.toml"
+    user_config = Path(USER_CONFIG_DIR).expanduser() / "cue.toml"
     if user_config.is_file():
         data = _load_toml(user_config)
         listed = _get_str_list(data, "search_path", "top level", user_config)
@@ -344,10 +342,10 @@ def resolve_search_path() -> tuple[Path, ...]:
 
 
 def load_site_defaults(search_path: Sequence[Path]) -> SiteDefaults:
-    """Layer [defaults] from each slurpy.toml. Earlier directories win."""
+    """Layer [defaults] from each cue.toml. Earlier directories win."""
     merged: dict[str, int | str] = {}
     for directory in reversed(search_path):
-        path = directory / "slurpy.toml"
+        path = directory / "cue.toml"
         if not path.is_file():
             continue
         data = _load_toml(path)
@@ -431,7 +429,7 @@ _SOFTWARE_TABLES = (
     "inject",
 )
 _RESOURCE_INT_KEYS = ("cpus", "memory_gb", "ntasks", "nodes", "throttle")
-STAGING_DIR = ".slurpy-staged"
+STAGING_DIR = ".cue-staged"
 
 
 def find_software_config(name: str, search_path: Sequence[Path]) -> Path | None:
@@ -459,8 +457,8 @@ def discover_software(search_path: Sequence[Path]) -> dict[str, Path]:
             if not toml_dir.is_dir():
                 continue
             for path in sorted(toml_dir.glob("*.toml")):
-                # slurpy.toml holds site defaults, not a software.
-                if path.name == "slurpy.toml":
+                # cue.toml holds site defaults, not a software.
+                if path.name == "cue.toml":
                     continue
                 found.setdefault(path.stem, path)
     return found
@@ -484,20 +482,20 @@ def parse_software_config(path: Path, name: str) -> SoftwareConfig:
         for ext in _get_str_list(software, "secondary_extensions", "[software]", path)
     )
     if secondary_extensions and not extensions:
-        raise SlurpyError(
+        raise CueError(
             f"{path} sets secondary_extensions without extensions. the "
             "primary extensions are needed to tell the two inputs apart"
         )
     if set(extensions) & set(secondary_extensions):
-        raise SlurpyError(
+        raise CueError(
             f"{path} lists the same extension in extensions and "
             "secondary_extensions. they must be distinct"
         )
     stem_mode = _get_str(software, "stem", "[software]", path) or "name"
     if stem_mode not in ("name", "parent"):
-        raise SlurpyError(f'"stem" in [software] of {path} must be "name" or "parent"')
+        raise CueError(f'"stem" in [software] of {path} must be "name" or "parent"')
     if stem_mode == "parent" and secondary_extensions:
-        raise SlurpyError(
+        raise CueError(
             f'{path} combines stem = "parent" with secondary_extensions. '
             "paired inputs always take their stems from the file names"
         )
@@ -511,7 +509,7 @@ def parse_software_config(path: Path, name: str) -> SoftwareConfig:
     )
     command = _get_str(execution, "command", "[execution]", path)
     if not command:
-        raise SlurpyError(
+        raise CueError(
             f"{path} has no [execution].command. it must give the shell "
             "command that runs the job"
         )
@@ -520,7 +518,7 @@ def parse_software_config(path: Path, name: str) -> SoftwareConfig:
     retrieve = _get_str_list(execution, "retrieve", "[execution]", path)
     for extension in retrieve:
         if not RETRIEVE_RE.fullmatch(extension):
-            raise SlurpyError(
+            raise CueError(
                 f'retrieve entry "{extension}" in [execution] of {path} is '
                 "not a plain file extension. use letters, digits, dots, "
                 "dashes"
@@ -530,18 +528,18 @@ def parse_software_config(path: Path, name: str) -> SoftwareConfig:
     config_logdir = _get_str(execution, "logdir", "[execution]", path)
     for dir_key, dir_value in (("outdir", config_outdir), ("logdir", config_logdir)):
         if dir_value is not None and not DIR_NAME_RE.fullmatch(dir_value):
-            raise SlurpyError(
+            raise CueError(
                 f'"{dir_key}" in [execution] of {path} contains unsupported '
                 "characters. use letters, digits, dots, dashes, "
                 "underscores, and slashes"
             )
     if archive and not scratch:
-        raise SlurpyError(
+        raise CueError(
             f"{path} sets archive = true without scratch = true. archiving "
             "packs the scratch directory, so enable scratch or drop archive"
         )
     if retrieve and not scratch:
-        raise SlurpyError(
+        raise CueError(
             f"{path} sets retrieve without scratch = true. retrieval copies "
             "files back from scratch, so enable scratch or drop retrieve"
         )
@@ -554,14 +552,14 @@ def parse_software_config(path: Path, name: str) -> SoftwareConfig:
     paths: dict[str, str] = {}
     for key, value in paths_table.items():
         if not isinstance(value, str):
-            raise SlurpyError(f'"{key}" in [paths] of {path} must be a string')
+            raise CueError(f'"{key}" in [paths] of {path} must be a string')
         if not PLACEHOLDER_RE.fullmatch(f"{{{key}}}"):
-            raise SlurpyError(
+            raise CueError(
                 f'"{key}" in [paths] of {path} is not a valid placeholder '
                 "name. use lowercase letters, digits, and underscores"
             )
         if key in ENGINE_PLACEHOLDERS:
-            raise SlurpyError(
+            raise CueError(
                 f'"{key}" in [paths] of {path} shadows a built-in '
                 "placeholder. rename it"
             )
@@ -595,7 +593,7 @@ def parse_software_config(path: Path, name: str) -> SoftwareConfig:
     exclude_file = _get_str(slurm, "exclude_file", "[slurm]", path)
     exclude_partition = _get_str(slurm, "exclude_partition", "[slurm]", path)
     if exclude and exclude_file:
-        raise SlurpyError(
+        raise CueError(
             f"{path} sets both exclude and exclude_file in [slurm]. " "keep one"
         )
 
@@ -607,14 +605,14 @@ def parse_software_config(path: Path, name: str) -> SoftwareConfig:
         or not isinstance(fraction_value, (int, float))
         or not 0 < float(fraction_value) <= 1
     ):
-        raise SlurpyError(
+        raise CueError(
             f'"memory_fraction" in [inject] of {path} must be a number '
             "between 0 and 1"
         )
     inject_memory_fraction = float(fraction_value)
     rules_value = inject.get("rules", [])
     if not isinstance(rules_value, list):
-        raise SlurpyError(f'"rules" in [inject] of {path} must be a list')
+        raise CueError(f'"rules" in [inject] of {path} must be a list')
     inject_rules: list[tuple[str, str]] = []
     for entry in rules_value:
         if (
@@ -623,19 +621,19 @@ def parse_software_config(path: Path, name: str) -> SoftwareConfig:
             or not isinstance(entry.get("match"), str)
             or not isinstance(entry.get("write"), str)
         ):
-            raise SlurpyError(
+            raise CueError(
                 f"every [inject] rule in {path} must be a table with "
                 "string keys match and write"
             )
         try:
             re.compile(entry["match"])
         except re.error as error:
-            raise SlurpyError(
+            raise CueError(
                 f"invalid regex in [inject] rule of {path}: {error}"
             ) from error
         inject_rules.append((entry["match"], entry["write"]))
     if stem_mode == "parent" and inject_rules:
-        raise SlurpyError(
+        raise CueError(
             f'{path} combines stem = "parent" with [inject] rules. '
             "parent-stem inputs share one filename, so staged copies "
             "would collide"
@@ -675,10 +673,10 @@ def apply_path_overrides(
     for item in overrides:
         key, separator, value = item.partition("=")
         if not separator or not key or not value:
-            raise SlurpyError(f'invalid --set "{item}". use --set key=value')
+            raise CueError(f'invalid --set "{item}". use --set key=value')
         if key not in paths:
             available = ", ".join(sorted(paths)) or "none"
-            raise SlurpyError(
+            raise CueError(
                 f'--set key "{key}" is not in [paths] of {software.source}. '
                 f"available: {available}"
             )
@@ -700,7 +698,7 @@ def substitute(template: str, values: Mapping[str, str], context: str) -> str:
             hint = ". set scratch = true in [execution]"
         elif key in ("secondary", "secondary_path"):
             hint = ". set secondary_extensions in [software]"
-        raise SlurpyError(
+        raise CueError(
             f'unknown placeholder "{{{key}}}" in {context}{hint}. '
             f"available: {', '.join(sorted(values))}"
         )
@@ -901,14 +899,14 @@ def render_script(spec: JobSpec, software: SoftwareConfig, site: SiteDefaults) -
 def _check_input_file(text: str) -> None:
     """Reject unsafe names and missing files."""
     if not INPUT_NAME_RE.fullmatch(text):
-        raise SlurpyError(
+        raise CueError(
             f'input "{text}" contains unsupported characters. rename '
             "the file using letters, digits, dots, dashes, underscores"
         )
     if not Path(text).is_file():
-        raise SlurpyError(
+        raise CueError(
             f'input file "{text}" not found. check the spelling, and '
-            "run slurpy from the directory containing the input or "
+            "run cue from the directory containing the input or "
             "give its path"
         )
 
@@ -916,7 +914,7 @@ def _check_input_file(text: str) -> None:
 def _record_stem(stem_sources: dict[str, str], stem: str, source: str) -> None:
     other = stem_sources.get(stem)
     if other is not None:
-        raise SlurpyError(
+        raise CueError(
             f'"{source}" and "{other}" would both write results named '
             f'"{stem}". rename one of them'
         )
@@ -951,18 +949,16 @@ def validate_inputs(
         _check_input_file(text)
         if software.extensions and Path(text).suffix not in software.extensions:
             expected = ", ".join(software.extensions)
-            raise SlurpyError(
+            raise CueError(
                 f'"{text}" does not match the {software.name} input '
                 f"extensions ({expected}). check the file, or submit with "
                 "a different software config"
             )
         if text in seen:
-            raise SlurpyError(
-                f'input "{text}" given more than once. check the file list'
-            )
+            raise CueError(f'input "{text}" given more than once. check the file list')
         seen.add(text)
         if software.stem_mode == "parent" and Path(text).parent.name in ("", "."):
-            raise SlurpyError(
+            raise CueError(
                 f'"{text}" has no calculation directory, and {software.name} '
                 "names jobs after it. give the directory, e.g. "
                 f"calc1/{Path(text).name}"
@@ -997,7 +993,7 @@ def group_paired_inputs(
         suffix = Path(text).suffix
         if suffix in software.extensions:
             if current is not None and not current_paired:
-                raise SlurpyError(
+                raise CueError(
                     f'"{current}" has no {secondary_names} file. every '
                     f"{primary_names} file needs at least one following it"
                 )
@@ -1005,14 +1001,14 @@ def group_paired_inputs(
             current_paired = False
         elif suffix in software.secondary_extensions:
             if current is None:
-                raise SlurpyError(
+                raise CueError(
                     f'"{text}" comes before any {primary_names} file. give '
                     f"the calculation file first, then its {secondary_names} "
                     "file(s)"
                 )
             pair = (current, text)
             if pair in seen_pairs:
-                raise SlurpyError(
+                raise CueError(
                     f'pair "{current}" + "{text}" given more than once. '
                     "check the file list"
                 )
@@ -1027,13 +1023,13 @@ def group_paired_inputs(
             stems.append(stem)
             current_paired = True
         else:
-            raise SlurpyError(
+            raise CueError(
                 f'"{text}" does not match the {software.name} input '
                 f"extensions ({primary_names}) or secondary extensions "
                 f"({secondary_names})"
             )
     if current is not None and not current_paired:
-        raise SlurpyError(
+        raise CueError(
             f'"{current}" has no {secondary_names} file. every '
             f"{primary_names} file needs at least one following it"
         )
@@ -1053,7 +1049,7 @@ def resolve_exclude(software: SoftwareConfig, partition: str | None) -> str | No
     if software.exclude_file:
         path = Path(software.exclude_file).expanduser()
         if not path.is_file():
-            raise SlurpyError(
+            raise CueError(
                 f"exclude_file {path} not found. fix the path in "
                 f"{software.source} or remove the setting"
             )
@@ -1086,7 +1082,7 @@ def resolve_spec(
 ) -> JobSpec:
     """Merge CLI flags, software resources, and site defaults into a spec."""
     if args.time is not None and not TIME_LIMIT_RE.fullmatch(args.time):
-        raise SlurpyError(
+        raise CueError(
             f'invalid --time "{args.time}". use D-HH:MM:SS, HH:MM:SS, or '
             "MM, for example 1-00:00:00"
         )
@@ -1098,30 +1094,30 @@ def resolve_spec(
     else:
         memory_gb = _resolve_int(args.memory, software, "memory_gb", site.memory_gb)
     if site.max_cpus is not None and cpus > site.max_cpus:
-        raise SlurpyError(
+        raise CueError(
             f"requested {cpus} cpus but max_cpus is {site.max_cpus}. lower "
-            "--cpus or raise max_cpus in slurpy.toml"
+            "--cpus or raise max_cpus in cue.toml"
         )
     if site.max_memory_gb is not None and memory_gb > site.max_memory_gb:
-        raise SlurpyError(
+        raise CueError(
             f"requested {memory_gb} GB but max_memory_gb is "
             f"{site.max_memory_gb}. lower --memory or raise max_memory_gb "
-            "in slurpy.toml"
+            "in cue.toml"
         )
     if len(inputs) > site.max_array_size:
-        raise SlurpyError(
+        raise CueError(
             f"{len(inputs)} inputs exceed max_array_size "
             f"({site.max_array_size}). split the submission or raise "
-            "max_array_size in slurpy.toml"
+            "max_array_size in cue.toml"
         )
 
     dependency = args.dependency
     if args.after:
         if dependency:
-            raise SlurpyError("give either --after or --dependency, not both")
+            raise CueError("give either --after or --dependency, not both")
         after_ids = [part.strip() for part in args.after.split(",") if part.strip()]
         if not after_ids or not all(re.fullmatch(r"\d+", i) for i in after_ids):
-            raise SlurpyError(
+            raise CueError(
                 f'invalid --after "{args.after}". give numeric job ids, '
                 "comma separated"
             )
@@ -1134,7 +1130,7 @@ def resolve_spec(
 
     job_name = args.job_name if args.job_name else stems[0]
     if not JOB_NAME_RE.fullmatch(job_name):
-        raise SlurpyError(
+        raise CueError(
             f'job name "{job_name}" contains unsupported characters. pass '
             "a plain name with --job-name"
         )
@@ -1145,7 +1141,7 @@ def resolve_spec(
             value = getattr(site, key)
         value = os.path.expanduser(value).rstrip("/") or "/"
         if not DIR_NAME_RE.fullmatch(value):
-            raise SlurpyError(
+            raise CueError(
                 f'--{key} "{value}" contains unsupported characters. use '
                 "letters, digits, dots, dashes, underscores, and slashes"
             )
@@ -1214,10 +1210,10 @@ def apply_inject_rules(
             numbers = ", ".join(
                 str(text.count("\n", 0, match.start()) + 1) for match in matches
             )
-            raise SlurpyError(
+            raise CueError(
                 f"{source} has {len(matches)} lines matching the inject "
                 f"rule for '{line}' (lines {numbers}). remove the "
-                "duplicates, slurpy will not guess which one to edit"
+                "duplicates, cue will not guess which one to edit"
             )
         plan.append((regex, line, bool(matches)))
     for regex, line, found in plan:
@@ -1235,11 +1231,11 @@ def stage_injected_inputs(
     Rewrite resource directives in staged copies of the primary inputs.
 
     The originals are never modified. The returned spec points at the
-    staged copies in .slurpy-staged/. With write false (dry runs) the
+    staged copies in .cue-staged/. With write false (dry runs) the
     rules are still applied so errors surface, but nothing is written.
     """
     if not software.inject_rules:
-        raise SlurpyError(
+        raise CueError(
             f"--inject-resources needs [inject] rules in {software.source}. "
             "add them, or drop the flag and set the directives by hand"
         )
@@ -1250,7 +1246,7 @@ def stage_injected_inputs(
         try:
             content = Path(original).read_text()
         except UnicodeDecodeError as error:
-            raise SlurpyError(
+            raise CueError(
                 f"{original} is not a text file, cannot inject resources"
             ) from error
         content = apply_inject_rules(content, software, values, original)
@@ -1302,8 +1298,8 @@ _JOB_FILE_KEYS = (
 )
 
 JOB_TEMPLATE = """\
-# slurpy job file. fill in what you need.
-# submit with: slurpy <task> -f thisfile.slpy
+# cue job file. fill in what you need.
+# submit with: cue <task> -f thisfile.cue
 # command-line flags override values given here.
 
 # task = "orca"                # errors if it does not match the command
@@ -1352,7 +1348,7 @@ def read_manifest(path: Path) -> list[str]:
     Paths resolve relative to the manifest's location.
     """
     if not path.is_file():
-        raise SlurpyError(f"manifest {path} not found. check the path")
+        raise CueError(f"manifest {path} not found. check the path")
     entries: list[str] = []
     for line in path.read_text().splitlines():
         stripped = line.strip()
@@ -1363,7 +1359,7 @@ def read_manifest(path: Path) -> list[str]:
         else:
             entries.append(str(path.parent / stripped))
     if not entries:
-        raise SlurpyError(f"manifest {path} lists no input files")
+        raise CueError(f"manifest {path} lists no input files")
     return entries
 
 
@@ -1375,11 +1371,11 @@ def load_job_file(path: Path, args: argparse.Namespace) -> str | None:
     Return the task recorded in the file, if any.
     """
     if not path.is_file():
-        raise SlurpyError(f"job file {path} not found. create one with slurpy template")
+        raise CueError(f"job file {path} not found. create one with cue template")
     data = _load_toml(path)
     _check_keys(data, _JOB_FILE_KEYS, "top level", path)
     if "memory" in data and "mem_per_cpu" in data:
-        raise SlurpyError(f"{path} sets both memory and mem_per_cpu. keep one")
+        raise CueError(f"{path} sets both memory and mem_per_cpu. keep one")
     for key, dest in _JOB_FILE_INT_KEYS.items():
         if key == "memory" and args.mem_per_cpu is not None:
             continue
@@ -1411,7 +1407,7 @@ def load_job_file(path: Path, args: argparse.Namespace) -> str | None:
     file_overrides: list[str] = []
     for key, path_value in paths_table.items():
         if not isinstance(path_value, str):
-            raise SlurpyError(f'"{key}" in [paths] of {path} must be a string')
+            raise CueError(f'"{key}" in [paths] of {path} must be a string')
         file_overrides.append(f"{key}={path_value}")
     if file_overrides:
         # command-line --set entries come later, so they win per key.
@@ -1492,29 +1488,29 @@ def record_submission(
     now = datetime.datetime.now()
     record_dir = Path(spec.outdir) / RECORD_SUBDIR
     record_dir.mkdir(parents=True, exist_ok=True)
-    existing = sorted(record_dir.glob("*.slpy"))
+    existing = sorted(record_dir.glob("*.cue"))
     while len(existing) >= site.record_limit:
         existing.pop(0).unlink()
     stamp = now.strftime("%Y-%m-%d-%H-%M-%S")
-    auto_path = record_dir / f"{stamp}-{job_id}.slpy"
+    auto_path = record_dir / f"{stamp}-{job_id}.cue"
     auto_path.write_text(_job_record_text(task, args, spec, original_inputs, ()))
     if args.record is None:
         return auto_path
     comments = (
-        f"recorded by slurpy on {now.isoformat(timespec='seconds')}",
+        f"recorded by cue on {now.isoformat(timespec='seconds')}",
         f"command: {' '.join(sys.argv)}",
         f"job id: {job_id}",
-        f"rerun with: slurpy {task} -f <this file>",
+        f"rerun with: cue {task} -f <this file>",
     )
     if args.record:
         path = Path(args.record).expanduser()
     else:
-        name = f"slurpy-{task}-{spec.job_name}-c{spec.cpus}m{spec.memory_gb}"
+        name = f"cue-{task}-{spec.job_name}-c{spec.cpus}m{spec.memory_gb}"
         if spec.partition:
             name += f"p{spec.partition}"
-        path = Path(f"{name}.slpy")
+        path = Path(f"{name}.cue")
         if path.exists():
-            path = Path(f"{name}-{job_id}.slpy")
+            path = Path(f"{name}-{job_id}.cue")
     path.write_text(_job_record_text(task, args, spec, original_inputs, comments))
     return path
 
@@ -1524,7 +1520,7 @@ def _next_backup_path(backup_dir: Path, name: str) -> Path:
         candidate = backup_dir / f"{name}.bck{index:02d}"
         if not candidate.exists():
             return candidate
-    raise SlurpyError(
+    raise CueError(
         f"{backup_dir} already holds {MAX_BACKUP_INDEX} backups of {name}. "
         "clean up old backups"
     )
@@ -1591,21 +1587,21 @@ def submit_script(script: str) -> str:
             timeout=SBATCH_TIMEOUT_SECONDS,
         )
     except FileNotFoundError as error:
-        raise SlurpyError(
-            "sbatch not found. slurpy must run on a machine with slurm, "
+        raise CueError(
+            "sbatch not found. cue must run on a machine with slurm, "
             "usually the cluster login node"
         ) from error
     except subprocess.TimeoutExpired as error:
-        raise SlurpyError(
+        raise CueError(
             f"sbatch did not respond within {SBATCH_TIMEOUT_SECONDS} "
             "seconds. check the scheduler and try again"
         ) from error
     if result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip()
-        raise SlurpyError(f"sbatch failed: {detail}")
+        raise CueError(f"sbatch failed: {detail}")
     stdout = result.stdout.strip()
     if not stdout:
-        raise SlurpyError("sbatch returned no output. check squeue")
+        raise CueError("sbatch returned no output. check squeue")
     return stdout.split()[-1]
 
 
@@ -1616,13 +1612,13 @@ def _run_slurm(command: Sequence[str]) -> str:
             list(command), text=True, capture_output=True, check=False
         )
     except FileNotFoundError as error:
-        raise SlurpyError(
+        raise CueError(
             f"{command[0]} not found. this command needs slurm, run it on "
             "the cluster"
         ) from error
     if result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip()
-        raise SlurpyError(f"{command[0]} failed: {detail}")
+        raise CueError(f"{command[0]} failed: {detail}")
     return result.stdout
 
 
@@ -1646,9 +1642,9 @@ def _deliver(kind: str, text: str, record: str | None) -> None:
     if record:
         path = Path(record).expanduser()
     else:
-        path = Path(f"slurpy-{kind}-{now.strftime('%Y%m%d-%H%M%S')}.txt")
+        path = Path(f"cue-{kind}-{now.strftime('%Y%m%d-%H%M%S')}.txt")
     header = (
-        f"# slurpy {kind}\n"
+        f"# cue {kind}\n"
         f"# {now.isoformat(timespec='seconds')}\n"
         f"# {' '.join(sys.argv)}\n\n"
     )
@@ -1658,7 +1654,7 @@ def _deliver(kind: str, text: str, record: str | None) -> None:
 
 def _take_argument(positionals: list[str], what: str, example: str) -> str:
     if not positionals:
-        raise SlurpyError(f"the {what} modifier needs a value, e.g. slurpy {example}")
+        raise CueError(f"the {what} modifier needs a value, e.g. cue {example}")
     return positionals.pop(0)
 
 
@@ -1671,9 +1667,7 @@ def _split_job_selectors(tokens: Sequence[str]) -> tuple[list[str], list[str]]:
 
 def cmd_queue(modifiers: str, argv: Sequence[str]) -> int:
     """Show or watch the queue, filtered by the stacked modifiers."""
-    parser = argparse.ArgumentParser(
-        prog="slurpy queue", description="show the job queue"
-    )
+    parser = argparse.ArgumentParser(prog="cue queue", description="show the job queue")
     parser.add_argument("args", nargs="*", metavar="ARG")
     parser.add_argument("-w", "--watch", action="store_true")
     parser.add_argument("-p", "--partition")
@@ -1685,7 +1679,7 @@ def cmd_queue(modifiers: str, argv: Sequence[str]) -> int:
 
     unknown = sorted(set(modifiers) - set(QUEUE_MODIFIERS))
     if unknown:
-        raise SlurpyError(
+        raise CueError(
             f'unknown queue modifier "{unknown[0]}". available: '
             f"{', '.join(QUEUE_MODIFIERS)} (watch, partition, all, user, job)"
         )
@@ -1702,16 +1696,16 @@ def cmd_queue(modifiers: str, argv: Sequence[str]) -> int:
             user = _take_argument(positionals, "user (u)", "qu somebody")
         elif letter == "j":
             if not positionals and not jobs:
-                raise SlurpyError(
+                raise CueError(
                     "the job modifier (j) needs at least one job id or "
-                    "name, e.g. slurpy qj 12345"
+                    "name, e.g. cue qj 12345"
                 )
             jobs += positionals
             positionals = []
     if positionals:
-        raise SlurpyError(
+        raise CueError(
             f'unexpected argument "{positionals[0]}". to filter by job, '
-            "use the j modifier, e.g. slurpy qj NAME"
+            "use the j modifier, e.g. cue qj NAME"
         )
 
     command = ["squeue", "-o", QUEUE_FORMAT]
@@ -1724,7 +1718,7 @@ def cmd_queue(modifiers: str, argv: Sequence[str]) -> int:
     if jobs:
         ids, names = _split_job_selectors(jobs)
         if ids and names:
-            raise SlurpyError(
+            raise CueError(
                 "give either job ids or job names to the j modifier, " "not both"
             )
         if ids:
@@ -1734,21 +1728,21 @@ def cmd_queue(modifiers: str, argv: Sequence[str]) -> int:
 
     if watch:
         if args.record is not None:
-            raise SlurpyError("--record cannot be combined with watch")
+            raise CueError("--record cannot be combined with watch")
         # watch(1) joins its arguments and runs them through sh -c.
         watch_command = ["watch", "-n", "30", shlex.join(command)]
         try:
             os.execvp("watch", watch_command)
         except OSError as error:
-            raise SlurpyError("watch not found on this machine") from error
+            raise CueError("watch not found on this machine") from error
     _deliver("queue", _run_slurm(command), args.record)
     return 0
 
 
 def load_partitions() -> tuple[str, ...]:
     """Read the partitions key from the bootstrap or any search dir."""
-    candidates = [Path(USER_CONFIG_DIR).expanduser() / "slurpy.toml"]
-    candidates += [d / "slurpy.toml" for d in resolve_search_path()]
+    candidates = [Path(USER_CONFIG_DIR).expanduser() / "cue.toml"]
+    candidates += [d / "cue.toml" for d in resolve_search_path()]
     for path in candidates:
         if not path.is_file():
             continue
@@ -1775,8 +1769,8 @@ def _detect_permitted_partitions() -> list[str]:
 
 
 def _write_partitions(partitions: Sequence[str]) -> Path:
-    """Set the partitions key in the user's bootstrap slurpy.toml."""
-    path = Path(USER_CONFIG_DIR).expanduser() / "slurpy.toml"
+    """Set the partitions key in the user's bootstrap cue.toml."""
+    path = Path(USER_CONFIG_DIR).expanduser() / "cue.toml"
     formatted = "partitions = [" + ", ".join(f'"{p}"' for p in partitions) + "]"
     if path.is_file():
         text = path.read_text()
@@ -1786,13 +1780,13 @@ def _write_partitions(partitions: Sequence[str]) -> Path:
         else:
             text = (
                 text.rstrip("\n")
-                + '\n\n# partitions you may use, from "slurpy p permission".\n'
+                + '\n\n# partitions you may use, from "cue p permission".\n'
                 + formatted
                 + "\n"
             )
     else:
         path.parent.mkdir(parents=True, exist_ok=True)
-        text = '# created by "slurpy p permission".\n' + formatted + "\n"
+        text = '# created by "cue p permission".\n' + formatted + "\n"
     path.write_text(text)
     return path
 
@@ -1800,7 +1794,7 @@ def _write_partitions(partitions: Sequence[str]) -> Path:
 def cmd_partition(argv: Sequence[str]) -> int:
     """Partition overview, availability view, or permission refresh."""
     parser = argparse.ArgumentParser(
-        prog="slurpy partition",
+        prog="cue partition",
         description="partition overview, availability, or permission check",
     )
     parser.add_argument(
@@ -1815,10 +1809,10 @@ def cmd_partition(argv: Sequence[str]) -> int:
 
     if "permission" in args.names:
         if len(args.names) > 1:
-            raise SlurpyError('use "slurpy p permission" on its own')
+            raise CueError('use "cue p permission" on its own')
         permitted = _detect_permitted_partitions()
         if not permitted:
-            raise SlurpyError(
+            raise CueError(
                 "no permitted partitions detected. check scontrol show "
                 "partition manually"
             )
@@ -1857,9 +1851,9 @@ def _resolve_job_names(names: Sequence[str]) -> list[tuple[str, str]]:
         if len(parts) == 2:
             matches.append((parts[0], parts[1]))
     if not matches:
-        raise SlurpyError(
+        raise CueError(
             f"no jobs of yours match name(s): {', '.join(names)}. "
-            'run "slurpy q" to see the queue'
+            'run "cue q" to see the queue'
         )
     return matches
 
@@ -1873,7 +1867,7 @@ def _gather_job_ids(targets: Sequence[str], action: str, assume_yes: bool) -> li
             print(f"  {job_id}  {job_name}")
         if not assume_yes:
             if not sys.stdin.isatty():
-                raise SlurpyError(
+                raise CueError(
                     f"confirmation needed to {action} jobs matched by "
                     "name. add --yes"
                 )
@@ -1888,7 +1882,7 @@ def _gather_job_ids(targets: Sequence[str], action: str, assume_yes: bool) -> li
 def cmd_cancel(argv: Sequence[str]) -> int:
     """Cancel jobs by id or by confirmed name match."""
     parser = argparse.ArgumentParser(
-        prog="slurpy cancel", description="cancel jobs by id or name"
+        prog="cue cancel", description="cancel jobs by id or name"
     )
     parser.add_argument("targets", nargs="+", metavar="ID|NAME")
     parser.add_argument("-y", "--yes", action="store_true")
@@ -1904,7 +1898,7 @@ def cmd_cancel(argv: Sequence[str]) -> int:
 def cmd_hold_release(argv: Sequence[str], action: str) -> int:
     """Hold or release jobs by id or by confirmed name match."""
     parser = argparse.ArgumentParser(
-        prog=f"slurpy {action}", description=f"{action} jobs by id or name"
+        prog=f"cue {action}", description=f"{action} jobs by id or name"
     )
     parser.add_argument("targets", nargs="+", metavar="ID|NAME")
     parser.add_argument("-y", "--yes", action="store_true")
@@ -1920,7 +1914,7 @@ def cmd_hold_release(argv: Sequence[str], action: str) -> int:
 def cmd_modify(argv: Sequence[str]) -> int:
     """Change settings of a submitted job via scontrol update."""
     parser = argparse.ArgumentParser(
-        prog="slurpy mod",
+        prog="cue mod",
         description="change settings of a submitted job",
     )
     parser.add_argument("job_id", metavar="ID")
@@ -1932,24 +1926,22 @@ def cmd_modify(argv: Sequence[str]) -> int:
     )
     args = parser.parse_args(list(argv))
     if not re.fullmatch(r"\d+(_\d+)?", args.job_id):
-        raise SlurpyError(
-            f'"{args.job_id}" is not a job id. slurpy mod takes one ' "numeric job id"
+        raise CueError(
+            f'"{args.job_id}" is not a job id. cue mod takes one ' "numeric job id"
         )
     updates: list[str] = []
     for item in args.settings:
         key, separator, value = item.partition("=")
         if not separator or not value:
-            raise SlurpyError(f'invalid setting "{item}". use key=value')
+            raise CueError(f'invalid setting "{item}". use key=value')
         field = MODIFY_KEYS.get(key)
         if field is None:
-            raise SlurpyError(
+            raise CueError(
                 f'unknown setting "{key}". available: '
                 f"{', '.join(sorted(MODIFY_KEYS))}"
             )
         if key == "time" and not TIME_LIMIT_RE.fullmatch(value):
-            raise SlurpyError(
-                f'invalid time "{value}". use D-HH:MM:SS, HH:MM:SS, or MM'
-            )
+            raise CueError(f'invalid time "{value}". use D-HH:MM:SS, HH:MM:SS, or MM')
         updates.append(f"{field}={value}")
     _run_slurm(["scontrol", "update", f"JobId={args.job_id}", *updates])
     print(f"updated {args.job_id}: {' '.join(updates)}")
@@ -2139,14 +2131,14 @@ def parse_window(token: str) -> datetime.timedelta | None:
         return None
     amount = int(match.group(1))
     if amount < 1:
-        raise SlurpyError(f'the window in "{token}" must be at least 1')
+        raise CueError(f'the window in "{token}" must be at least 1')
     return datetime.timedelta(hours=amount * _WINDOW_HOURS[match.group(2)])
 
 
 def cmd_history(argv: Sequence[str]) -> int:
     """Show finished jobs, or a usage summary for a month window."""
     parser = argparse.ArgumentParser(
-        prog="slurpy hist",
+        prog="cue hist",
         description="finished jobs: recent list, range, state filter, "
         "ids, or a window usage summary",
     )
@@ -2173,7 +2165,7 @@ def cmd_history(argv: Sequence[str]) -> int:
         if range_match:
             job_range = (int(range_match.group(1)), int(range_match.group(2)))
             if job_range[0] < 1 or job_range[0] > job_range[1]:
-                raise SlurpyError(
+                raise CueError(
                     f'invalid range "{token}". use A..B with 1 <= A <= B, '
                     "1 is the newest job"
                 )
@@ -2185,9 +2177,7 @@ def cmd_history(argv: Sequence[str]) -> int:
         elif token.isdigit() and int(token) < HISTORY_COUNT_LIMIT:
             count = int(token)
             if count < 1:
-                raise SlurpyError(
-                    "the job count must be at least 1, e.g. slurpy hist 10"
-                )
+                raise CueError("the job count must be at least 1, e.g. cue hist 10")
         elif re.fullmatch(r"\d+(_\d+)?", token):
             ids.append(token)
         else:
@@ -2220,7 +2210,7 @@ def cmd_history(argv: Sequence[str]) -> int:
     else:
         jobs = jobs[: count if count is not None else 10]
     if not jobs:
-        raise SlurpyError(
+        raise CueError(
             "no finished jobs matched. sacct only reaches back one year "
             "here, and slurm accounting retention may be shorter"
         )
@@ -2228,7 +2218,7 @@ def cmd_history(argv: Sequence[str]) -> int:
     return 0
 
 
-RECORD_NAME_RE = re.compile(r"(\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2})-(\d+)\.slpy")
+RECORD_NAME_RE = re.compile(r"(\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2})-(\d+)\.cue")
 # sacct job ids: 1234, 1234_17, or pending ranges 1234_[18-20%2].
 SACCT_ID_RE = re.compile(r"(\d+)(?:_(\d+|\[[^\]]+\]))?")
 
@@ -2263,9 +2253,9 @@ def _record_stores(site: SiteDefaults, directory: str | None) -> list[Path]:
     if directory is not None:
         store = Path(directory).expanduser() / RECORD_SUBDIR
         if not store.is_dir():
-            raise SlurpyError(
+            raise CueError(
                 f"no {store} found. --dir must name an output directory "
-                "slurpy has submitted to"
+                "cue has submitted to"
             )
         return [store]
     stores = []
@@ -2277,9 +2267,9 @@ def _record_stores(site: SiteDefaults, directory: str | None) -> list[Path]:
         if candidate.is_dir() and candidate != default:
             stores.append(candidate)
     if not stores:
-        raise SlurpyError(
+        raise CueError(
             f"no {RECORD_SUBDIR}/ record stores found here. status works "
-            "in a directory slurpy has submitted from, or on one given "
+            "in a directory cue has submitted from, or on one given "
             "with --dir"
         )
     return stores
@@ -2291,7 +2281,7 @@ def load_submission_records(
     """Read the project's submission ledger, oldest first."""
     records: list[SubmissionRecord] = []
     for store in _record_stores(site, directory):
-        for path in sorted(store.glob("*.slpy")):
+        for path in sorted(store.glob("*.cue")):
             match = RECORD_NAME_RE.fullmatch(path.name)
             if not match:
                 continue
@@ -2305,9 +2295,9 @@ def load_submission_records(
                 )
             )
     if not records:
-        raise SlurpyError(
+        raise CueError(
             "the record stores hold no submission records. status works "
-            "in a directory slurpy has submitted from"
+            "in a directory cue has submitted from"
         )
     return sorted(records, key=lambda record: record.stamp)
 
@@ -2372,7 +2362,7 @@ def _rerun_inputs(record: SubmissionRecord, failed_indices: Sequence[int]) -> li
     search_path = resolve_search_path()
     config_path = find_software_config(record.task, search_path)
     if config_path is None:
-        raise SlurpyError(
+        raise CueError(
             f'record {record.path} names task "{record.task}", which has '
             "no config here. cannot build a rerun file"
         )
@@ -2415,7 +2405,7 @@ def _write_rerun_file(
     record: SubmissionRecord, tasks: Mapping[int | None, str]
 ) -> tuple[Path | None, int, int]:
     """
-    Write rerun-<jobid>.slpy for the record's failed tasks.
+    Write rerun-<jobid>.cue for the record's failed tasks.
 
     Return the path (None when nothing failed), the failure count, and
     the count of tasks still pending or running.
@@ -2444,7 +2434,7 @@ def _write_rerun_file(
         f"rerun for job {record.job_id} ({record.task})",
         f"fail reasons: {reason_text}",
     ]
-    path = Path(f"rerun-{record.job_id}.slpy")
+    path = Path(f"rerun-{record.job_id}.cue")
     path.write_text(_render_record(record.data, inputs, comments))
     return path, failed_count, active
 
@@ -2452,7 +2442,7 @@ def _write_rerun_file(
 def cmd_status(argv: Sequence[str]) -> int:
     """Fate of this project's submissions, from the record ledger."""
     parser = argparse.ArgumentParser(
-        prog="slurpy status",
+        prog="cue status",
         description="status of jobs submitted from this directory",
     )
     parser.add_argument(
@@ -2464,7 +2454,7 @@ def cmd_status(argv: Sequence[str]) -> int:
     parser.add_argument(
         "--rerun",
         action="store_true",
-        help="write rerun-<jobid>.slpy files for failed tasks",
+        help="write rerun-<jobid>.cue files for failed tasks",
     )
     parser.add_argument(
         "--dir",
@@ -2494,7 +2484,7 @@ def cmd_status(argv: Sequence[str]) -> int:
         cutoff = datetime.datetime.now() - max(windows)
         records = [r for r in records if r.stamp >= cutoff]
     if not records:
-        raise SlurpyError("no submission records match the selectors")
+        raise CueError("no submission records match the selectors")
 
     states = fetch_job_states([record.job_id for record in records])
     lines = [f"{'jobid':<10} {'task':<12} {'submitted':<19} state"]
@@ -2540,7 +2530,7 @@ def _positive_int(text: str) -> int:
 
 def build_submit_parser(software_name: str) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog=f"slurpy {software_name}",
+        prog=f"cue {software_name}",
         description=f"submit {software_name} job(s) to slurm",
     )
     parser.add_argument("inputs", nargs="*", metavar="input")
@@ -2556,7 +2546,7 @@ def build_submit_parser(software_name: str) -> argparse.ArgumentParser:
         "--file",
         dest="job_file",
         metavar="FILE",
-        help="job file with settings and inputs (see slurpy template)",
+        help="job file with settings and inputs (see cue template)",
     )
     parser.add_argument(
         "--record",
@@ -2656,22 +2646,22 @@ def build_submit_parser(software_name: str) -> argparse.ArgumentParser:
     return parser
 
 
-def _unknown_software_error(name: str, search_path: Sequence[Path]) -> SlurpyError:
+def _unknown_software_error(name: str, search_path: Sequence[Path]) -> CueError:
     discovered = discover_software(search_path)
     searched = (
         ", ".join(str(d) for d in search_path)
         + " (software/ subdirectories and flat .toml files)"
     )
     if discovered:
-        return SlurpyError(
+        return CueError(
             f'unknown task "{name}". available: '
-            f"{', '.join(sorted(discovered))}. run \"slurpy list\" for "
+            f"{', '.join(sorted(discovered))}. run \"cue list\" for "
             f"details. searched: {searched}"
         )
-    return SlurpyError(
+    return CueError(
         f'unknown task "{name}" and no task configs found at all. '
-        f'searched: {searched}. run "slurpy init" to scaffold, then copy '
-        "configs from the slurpy repo or your group's shared directory"
+        f'searched: {searched}. run "cue init" to scaffold, then copy '
+        "configs from the cue repo or your group's shared directory"
     )
 
 
@@ -2682,7 +2672,7 @@ def _submission_lock(output_dir: Path) -> Iterator[None]:
 
     Prevents backup numbering and manifest writes from racing.
     """
-    lock_path = output_dir / ".slurpy.lock"
+    lock_path = output_dir / ".cue.lock"
     with lock_path.open("w") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX)
         try:
@@ -2702,20 +2692,20 @@ def cmd_submit(software_name: str, argv: Sequence[str]) -> int:
     if args.job_file:
         file_task = load_job_file(Path(args.job_file).expanduser(), args)
     if not args.inputs:
-        raise SlurpyError(
+        raise CueError(
             "no inputs given. list input files on the command line or in "
             "the job file"
         )
     if args.variant:
         software_name = f"{software_name}-{args.variant}"
     if file_task is not None and file_task != software_name:
-        raise SlurpyError(
+        raise CueError(
             f'the job file is for task "{file_task}" but "{software_name}" '
-            f'was invoked. use "slurpy {file_task} -f {args.job_file}" or '
+            f'was invoked. use "cue {file_task} -f {args.job_file}" or '
             "remove the task line"
         )
     if not SOFTWARE_NAME_RE.fullmatch(software_name):
-        raise SlurpyError(
+        raise CueError(
             f'invalid task name "{software_name}". use lowercase '
             "letters, digits, hyphens, dots, and underscores"
         )
@@ -2727,7 +2717,7 @@ def cmd_submit(software_name: str, argv: Sequence[str]) -> int:
     software = parse_software_config(config_path, software_name)
     software = apply_path_overrides(software, args.overrides)
     if args.program_args and "{args}" not in software.command:
-        raise SlurpyError(
+        raise CueError(
             f"{software.name} does not take --args: its command in "
             f"{software.source} has no {{args}} placeholder"
         )
@@ -2805,7 +2795,7 @@ def build_salloc_command(
 def cmd_interactive(argv: Sequence[str]) -> int:
     """Open an interactive shell on a compute node via salloc."""
     parser = argparse.ArgumentParser(
-        prog="slurpy int",
+        prog="cue int",
         description="interactive shell on a compute node",
     )
     parser.add_argument("-c", "--cpus", type=_positive_int)
@@ -2816,9 +2806,7 @@ def cmd_interactive(argv: Sequence[str]) -> int:
     parser.add_argument("-p", "--partition")
     args = parser.parse_args(list(argv))
     if args.time is not None and not TIME_LIMIT_RE.fullmatch(args.time):
-        raise SlurpyError(
-            f'invalid --time "{args.time}". use D-HH:MM:SS, HH:MM:SS, or MM'
-        )
+        raise CueError(f'invalid --time "{args.time}". use D-HH:MM:SS, HH:MM:SS, or MM')
     site = load_site_defaults(resolve_search_path())
     shell = os.environ.get("SHELL", "/bin/bash")
     command = build_salloc_command(args, site, shell)
@@ -2826,8 +2814,8 @@ def cmd_interactive(argv: Sequence[str]) -> int:
     try:
         os.execvp(command[0], command)
     except OSError as error:
-        raise SlurpyError(
-            "salloc not found. slurpy int must run on a machine with slurm"
+        raise CueError(
+            "salloc not found. cue int must run on a machine with slurm"
         ) from error
 
 
@@ -2835,7 +2823,7 @@ def _check_task_config(path: Path, name: str) -> str:
     """Health check one task config: parse it and probe its paths."""
     try:
         software = parse_software_config(path, name)
-    except SlurpyError as error:
+    except CueError as error:
         return f"config error: {error}"
     missing: list[str] = []
     unchecked = False
@@ -2860,7 +2848,7 @@ def _check_task_config(path: Path, name: str) -> str:
 def cmd_list(argv: Sequence[str]) -> int:
     """Show the config search path and the available tasks."""
     parser = argparse.ArgumentParser(
-        prog="slurpy list",
+        prog="cue list",
         description="available tasks and config paths",
     )
     parser.add_argument(
@@ -2897,8 +2885,8 @@ def cmd_list(argv: Sequence[str]) -> int:
     if not discovered:
         print()
         print(
-            'no task configs found. run "slurpy init" to scaffold, '
-            "then copy configs from the slurpy repo or your group's "
+            'no task configs found. run "cue init" to scaffold, '
+            "then copy configs from the cue repo or your group's "
             "shared directory"
         )
         return 0
@@ -2925,8 +2913,8 @@ def cmd_list(argv: Sequence[str]) -> int:
 def cmd_link(argv: Sequence[str]) -> int:
     """Create shorthand symlinks such as sorca and sq."""
     parser = argparse.ArgumentParser(
-        prog="slurpy link",
-        description=("create shorthand symlinks so that e.g. sorca means slurpy orca"),
+        prog="cue link",
+        description=("create shorthand symlinks so that e.g. sorca means cue orca"),
     )
     parser.add_argument(
         "software",
@@ -2944,8 +2932,8 @@ def cmd_link(argv: Sequence[str]) -> int:
         names = sorted(n for n in discovered if n not in RESERVED_COMMANDS)
         names += ["int", "q"]
     if not names:
-        raise SlurpyError(
-            'no task configs found to link. run "slurpy list" to see ' "the search path"
+        raise CueError(
+            'no task configs found to link. run "cue list" to see ' "the search path"
         )
     for name in names:
         if name not in discovered and name not in ("int", "interactive", "q"):
@@ -2961,11 +2949,11 @@ def cmd_link(argv: Sequence[str]) -> int:
             if link.resolve() == target:
                 print(f"exists: {link}")
                 continue
-            raise SlurpyError(
+            raise CueError(
                 f"{link} already exists and points elsewhere. remove it " "first"
             )
         if link.exists():
-            raise SlurpyError(f"{link} already exists. remove it first")
+            raise CueError(f"{link} already exists. remove it first")
         link.symlink_to(target)
         print(f"created: {link} -> {target}")
     path_dirs = {
@@ -2978,15 +2966,15 @@ def cmd_link(argv: Sequence[str]) -> int:
     return 0
 
 
-INIT_SLURPY_TOML = """\
-# slurpy site configuration.
+INIT_CUE_TOML = """\
+# cue site configuration.
 
 # directories searched for configs, in order. first match wins. add your
 # own directory or shared group directories, for example:
-# search_path = ["~/my-configs", "~/.config/slurpy", "/software/mygroup/slurpy"]
-# when unset, ~/.config/slurpy and ~/bin are searched. note that
-# search_path only takes effect in ~/.config/slurpy/slurpy.toml.
-# search_path = ["~/.config/slurpy", "~/bin"]
+# search_path = ["~/my-configs", "~/.config/cue", "/software/mygroup/cue"]
+# when unset, ~/.config/cue and ~/bin are searched. note that
+# search_path only takes effect in ~/.config/cue/cue.toml.
+# search_path = ["~/.config/cue", "~/bin"]
 
 [defaults]
 # partition = "chem"
@@ -3005,15 +2993,15 @@ scratch_base = "/scratch"
 # auto-recorded job files kept in <outdir>/.rec/ before pruning.
 # record_limit = 1000
 
-# partitions shown by "slurpy p", detected and kept current by
-# "slurpy p permission". all partitions when unset.
+# partitions shown by "cue p", detected and kept current by
+# "cue p permission". all partitions when unset.
 # partitions = ["chem", "compchem"]
 """
 
 INIT_EXEC_TOML = """\
 # generic runner: submits any script with the given launcher.
-# usage: slurpy exec job.sh
-#        slurpy exec analysis.py --launcher python3
+# usage: cue exec job.sh
+#        cue exec analysis.py --launcher python3
 
 [execution]
 command = '{launcher} "{input}"'
@@ -3036,7 +3024,7 @@ extensions = [".in"]
 # stem = "name"
 
 [resources]
-# defaults for this software, override the site defaults in slurpy.toml.
+# defaults for this software, override the site defaults in cue.toml.
 # command-line flags override both.
 cpus = 1
 memory_gb = 2
@@ -3104,11 +3092,11 @@ retrieve = []
 
 def _write_bootstrap_pointer(chosen_dir: Path) -> None:
     """Make a custom config directory findable via the bootstrap file."""
-    bootstrap = Path(USER_CONFIG_DIR).expanduser() / "slurpy.toml"
+    bootstrap = Path(USER_CONFIG_DIR).expanduser() / "cue.toml"
     if not bootstrap.exists():
         bootstrap.parent.mkdir(parents=True, exist_ok=True)
         bootstrap.write_text(
-            "# points slurpy at your chosen config directory.\n"
+            "# points cue at your chosen config directory.\n"
             "# edit search_path to change or add locations.\n"
             f'search_path = ["{chosen_dir}"]\n'
         )
@@ -3125,7 +3113,7 @@ def _write_bootstrap_pointer(chosen_dir: Path) -> None:
 def cmd_init(argv: Sequence[str]) -> int:
     """Scaffold a config directory with commented templates."""
     parser = argparse.ArgumentParser(
-        prog="slurpy init",
+        prog="cue init",
         description="create a config directory with commented templates",
     )
     parser.add_argument(
@@ -3139,7 +3127,7 @@ def cmd_init(argv: Sequence[str]) -> int:
     if not base.is_absolute():
         base = Path.cwd() / base
     files = {
-        base / "slurpy.toml": INIT_SLURPY_TOML,
+        base / "cue.toml": INIT_CUE_TOML,
         base / "software" / "exec.toml": INIT_EXEC_TOML,
         base / "software" / "example.toml": INIT_EXAMPLE_TOML,
     }
@@ -3153,8 +3141,7 @@ def cmd_init(argv: Sequence[str]) -> int:
     if base != Path(USER_CONFIG_DIR).expanduser():
         _write_bootstrap_pointer(base)
     print(
-        "next: edit slurpy.toml, then add software configs under "
-        f"{base / 'software'}"
+        "next: edit cue.toml, then add software configs under " f"{base / 'software'}"
     )
     return 0
 
@@ -3162,7 +3149,7 @@ def cmd_init(argv: Sequence[str]) -> int:
 def cmd_template(argv: Sequence[str]) -> int:
     """Print or write a commented job file template."""
     parser = argparse.ArgumentParser(
-        prog="slurpy template",
+        prog="cue template",
         description="print or write a job file template",
     )
     parser.add_argument("file", nargs="?", metavar="FILE")
@@ -3172,42 +3159,42 @@ def cmd_template(argv: Sequence[str]) -> int:
         return 0
     path = Path(args.file).expanduser()
     if path.exists():
-        raise SlurpyError(f"{path} already exists, not overwriting it")
+        raise CueError(f"{path} already exists, not overwriting it")
     path.write_text(JOB_TEMPLATE)
     print(f"created: {path}")
     return 0
 
 
 COMPLETION_TEMPLATE = """\
-# bash completion for slurpy. install with:
-#   eval "$(slurpy completion)"
-_slurpy_complete() {{
+# bash completion for cue. install with:
+#   eval "$(cue completion)"
+_cue_complete() {{
     local cur prev task
     cur="${{COMP_WORDS[COMP_CWORD]}}"
     prev="${{COMP_WORDS[COMP_CWORD - 1]}}"
     task=""
-    if [ "${{COMP_WORDS[0]}}" != "slurpy" ]; then
+    if [ "${{COMP_WORDS[0]}}" != "cue" ]; then
         task="${{COMP_WORDS[0]#s}}"
     fi
     if [ "$COMP_CWORD" -eq 1 ] && [ -z "$task" ]; then
         local names
-        names="$(slurpy list --names 2>/dev/null)"
+        names="$(cue list --names 2>/dev/null)"
         COMPREPLY=($(compgen -W "{commands} $names" -- "$cur"))
         return
     fi
     [ -z "$task" ] && task="${{COMP_WORDS[1]}}"
     case "$prev" in
         -p|--partition)
-            COMPREPLY=($(compgen -W "$(slurpy list --partitions 2>/dev/null)" -- "$cur"))
+            COMPREPLY=($(compgen -W "$(cue list --partitions 2>/dev/null)" -- "$cur"))
             return
             ;;
         -f|--file)
-            COMPREPLY=($(compgen -f -X '!*.slpy' -- "$cur") $(compgen -d -- "$cur"))
+            COMPREPLY=($(compgen -f -X '!*.cue' -- "$cur") $(compgen -d -- "$cur"))
             return
             ;;
         --variant)
             local variants
-            variants="$(slurpy list --names 2>/dev/null | sed -n "s/^$task-//p")"
+            variants="$(cue list --names 2>/dev/null | sed -n "s/^$task-//p")"
             COMPREPLY=($(compgen -W "$variants" -- "$cur"))
             return
             ;;
@@ -3218,17 +3205,17 @@ _slurpy_complete() {{
     fi
     COMPREPLY=($(compgen -f -- "$cur"))
 }}
-complete -o filenames -F _slurpy_complete slurpy
+complete -o filenames -F _cue_complete cue
 """
 
 COMPLETION_ALIASES = """\
-for _slurpy_task in $(slurpy list --names 2>/dev/null); do
-    if ! type "s$_slurpy_task" >/dev/null 2>&1; then
-        alias "s$_slurpy_task"="slurpy $_slurpy_task"
-        complete -o filenames -F _slurpy_complete "s$_slurpy_task"
+for _cue_task in $(cue list --names 2>/dev/null); do
+    if ! type "s$_cue_task" >/dev/null 2>&1; then
+        alias "s$_cue_task"="cue $_cue_task"
+        complete -o filenames -F _cue_complete "s$_cue_task"
     fi
 done
-unset _slurpy_task
+unset _cue_task
 """
 
 _COMPLETION_COMMANDS = (
@@ -3251,8 +3238,8 @@ def _submit_flag_strings() -> str:
 def cmd_completion(argv: Sequence[str]) -> int:
     """Print the bash completion script, with guarded task aliases."""
     parser = argparse.ArgumentParser(
-        prog="slurpy completion",
-        description='bash completion, install with eval "$(slurpy completion)"',
+        prog="cue completion",
+        description='bash completion, install with eval "$(cue completion)"',
     )
     parser.add_argument(
         "--no-aliases",
@@ -3279,8 +3266,8 @@ def _command_from_program_name(program: str) -> str:
 
 def split_command(argv: Sequence[str]) -> tuple[str | None, list[str]]:
     """Resolve the command from argv[0] (symlink) or argv[1]."""
-    program = Path(argv[0]).name if argv else "slurpy"
-    if program not in ("slurpy", "slurpy.py"):
+    program = Path(argv[0]).name if argv else "cue"
+    if program not in ("cue", "cue.py"):
         return _command_from_program_name(program), list(argv[1:])
     if len(argv) < 2:
         return None, []
@@ -3293,9 +3280,9 @@ def run(argv: Sequence[str]) -> int:
         print(HELP_TEXT)
         return 0
     if command in ("version", "--version"):
-        print(f"slurpy {__version__}")
+        print(f"cue {__version__}")
         return 0
-    # allow flag-style command spellings such as slurpy -qwp chem.
+    # allow flag-style command spellings such as cue -qwp chem.
     command = command.lstrip("-") or "help"
     if command == "help":
         print(HELP_TEXT)
@@ -3334,16 +3321,16 @@ def run(argv: Sequence[str]) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     try:
         return run(sys.argv if argv is None else argv)
-    except SlurpyError as error:
-        print(f"slurpy: error: {error}", file=sys.stderr)
+    except CueError as error:
+        print(f"cue: error: {error}", file=sys.stderr)
         return 1
     except OSError as error:
         # process boundary: translate filesystem failures into the same
         # actionable form instead of a traceback.
-        print(f"slurpy: error: {error}", file=sys.stderr)
+        print(f"cue: error: {error}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
-        print("slurpy: interrupted", file=sys.stderr)
+        print("cue: interrupted", file=sys.stderr)
         return 130
 
 

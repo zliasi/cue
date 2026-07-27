@@ -1,7 +1,7 @@
 # std2 simplified TD-DFT (grimme-lab, successor of stda). molden input
 # mode: bring a molden file from a preceding DFT calculation.
-# usage: slurpy std2 wfn.molden
-#        slurpy std2 wfn.molden --args "-ax 0.25 -e 10 -rpa"
+# usage: cue std2 wfn.molden
+#        cue std2 wfn.molden --args "-ax 0.25 -e 10 -rpa"
 # -ax must match the functional's fock exchange (0.25 = PBE0). flags
 # given through --args come last and win.
 # for the xtb-based mode without a DFT wavefunction see std2-xtb.

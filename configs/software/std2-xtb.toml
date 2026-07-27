@@ -1,7 +1,7 @@
 # std2 in xtb mode: xtb4stda builds the wavefunction from a geometry,
 # std2 computes the spectrum, no DFT calculation needed.
-# usage: slurpy std2-xtb mol.xyz
-#        slurpy std2-xtb mol.xyz --args "-e 10"
+# usage: cue std2-xtb mol.xyz
+#        cue std2-xtb mol.xyz --args "-e 10"
 
 [software]
 extensions = [".xyz", ".coord"]

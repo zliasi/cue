@@ -1,6 +1,6 @@
 # sharc surface hopping dynamics. set [paths] for your cluster.
-# usage: slurpy sharc traj_1.inp
-#        slurpy sharc traj_*.inp -T 10        (array)
+# usage: cue sharc traj_1.inp
+#        cue sharc traj_*.inp -T 10        (array)
 # trajectory inputs are uniquely named .inp files living next to their
 # INITCONDS file and QM/ directory. the job copies the .inp into scratch
 # under sharc's fixed name "input", brings the siblings along, runs

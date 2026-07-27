@@ -1,10 +1,10 @@
-# slurpy site configuration. copy to ~/.config/slurpy/slurpy.toml and edit.
+# cue site configuration. copy to ~/.config/cue/cue.toml and edit.
 
 # directories searched for configs, in order. first match wins. add your
 # own directory or shared group directories, for example:
-# search_path = ["~/my-configs", "~/.config/slurpy", "/software/mygroup/slurpy"]
-# when unset, ~/.config/slurpy and ~/bin are searched.
-# search_path = ["~/.config/slurpy", "~/bin"]
+# search_path = ["~/my-configs", "~/.config/cue", "/software/mygroup/cue"]
+# when unset, ~/.config/cue and ~/bin are searched.
+# search_path = ["~/.config/cue", "~/bin"]
 
 [defaults]
 # partition = "chem"
@@ -21,8 +21,8 @@ scratch_base = "/scratch"
 # max_cpus = 64
 # max_memory_gb = 500
 
-# partitions shown by "slurpy p", detected and kept current by
-# "slurpy p permission". all partitions when unset.
+# partitions shown by "cue p", detected and kept current by
+# "cue p permission". all partitions when unset.
 # partitions = ["chem", "compchem"]
 
 # auto-recorded job files kept in <outdir>/.rec/ before pruning.

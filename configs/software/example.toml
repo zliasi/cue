@@ -14,7 +14,7 @@ extensions = [".in"]
 # stem = "name"
 
 [resources]
-# defaults for this software, override the site defaults in slurpy.toml.
+# defaults for this software, override the site defaults in cue.toml.
 # command-line flags override both.
 cpus = 1
 memory_gb = 2
