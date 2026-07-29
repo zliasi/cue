@@ -5,6 +5,8 @@
 - the project is renamed to cue: cue.py, cue.toml, ~/.config/cue,
   CUE_CONFIG_PATH, and .cue job files
 - the generic runner task is renamed from exec to run
+- task configs live in tasks/ (was software/) and start with a [task]
+  table (was [software])
 - new adf task config: the whole amsterdam modeling suite via the ams
   driver
 - configurable output and slurm log directories: -o/--out/--outdir and

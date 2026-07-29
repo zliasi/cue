@@ -1,0 +1,27 @@
+# gpaw. copy to <config dir>/tasks/gpaw.toml and adjust setup.
+# runs in place (no scratch): results land next to the input script.
+
+[task]
+extensions = [".py"]
+
+[resources]
+ntasks = 8
+
+[environment]
+# gpaw is usually installed in a conda environment. activate it here,
+# for example:
+#   . "/path/to/miniconda3/etc/profile.d/conda.sh"
+#   conda activate myenv
+#   export PATH="$CONDA_PREFIX/bin:$PATH"
+setup = """
+module purge
+export OMP_NUM_THREADS={cpus}
+# gpaw built against openblas hangs without this.
+export OPENBLAS_NUM_THREADS=1
+# openmpi tuning that has proven necessary on some clusters:
+# export OMPI_MCA_pml=ob1
+# export OMPI_MCA_btl=vader,self
+"""
+
+[execution]
+command = 'mpirun -np "$SLURM_NTASKS" gpaw python -- "{input}"'

@@ -1,4 +1,4 @@
-"""Tests for migrate.py: bash submit script to software config."""
+"""Tests for migrate.py: bash submit script to task config."""
 
 from __future__ import annotations
 
@@ -96,9 +96,9 @@ class RoundTripTests(unittest.TestCase):
             old_cwd = os.getcwd()
             os.chdir(tmp)
             try:
-                software_dir = Path("cfg/software")
-                software_dir.mkdir(parents=True)
-                (software_dir / "mine.toml").write_text(
+                tasks_dir = Path("cfg/tasks")
+                tasks_dir.mkdir(parents=True)
+                (tasks_dir / "mine.toml").write_text(
                     migrate.convert(OLD_SCRIPT, Path("smine"))
                 )
                 Path("job.inp").write_text("")

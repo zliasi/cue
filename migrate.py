@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Draft a cue software config from an old bash submit script.
+Draft a cue task config from an old bash submit script.
 
 Best-effort extraction of paths, environment setup, resource defaults,
 the run command, and scratch/archive/retrieve behavior. The output is a
@@ -277,7 +277,7 @@ def guess_name(script: Path) -> str:
             break
     for suffix in ("_submit", "-submit", ".sh"):
         name = name.removesuffix(suffix)
-    return name or "mysoftware"
+    return name or "mytask"
 
 
 def convert(text: str, script: Path) -> str:
@@ -297,7 +297,7 @@ def convert(text: str, script: Path) -> str:
         "# resolve the TODOs, then verify with:",
         f"#   cue {name} --dry-run <input>",
         "",
-        "[software]",
+        "[task]",
     ]
     if extensions:
         formatted = ", ".join(f'"{e}"' for e in extensions)

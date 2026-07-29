@@ -35,8 +35,8 @@ curl -LO https://raw.githubusercontent.com/zliasi/cue/main/cue.py
 Prefer a different config folder? `cue init --dir ~/my-configs` scaffolds
 it there and cue remembers the location (unless a
 `~/.config/cue/cue.toml` already exists, then add the directory to
-its `search_path` yourself, cue prints a reminder). Then copy software configs
-from this repo's `configs/software/` into a config directory and fill in the
+its `search_path` yourself, cue prints a reminder). Then copy task configs
+from this repo's `configs/tasks/` into a config directory and fill in the
 paths for your cluster.
 
 ## Usage
@@ -109,7 +109,7 @@ Use `-h` for an overview of flags
     --mail-user EMAIL       mail recipient
     --dependency STR        slurm dependency, e.g. afterok:12345
     --launcher CMD          program that runs the input (run-style configs)
-    --variant NAME          software variant
+    --variant NAME          task variant
     --args STRING           extra program arguments, e.g. --args "--opt
                             --gfn 2" (configs with an {args} placeholder)
     --set KEY=VALUE         override a [paths] value for this submission
@@ -125,7 +125,7 @@ Use `-h` for an overview of flags
     --record [FILE]         write a visible, rerunnable job file
 ```
 
-Defaults come from the software config, then `cue.toml`, then built-in
+Defaults come from the task config, then `cue.toml`, then built-in
 fallbacks.
 
 ## Job files
@@ -222,7 +222,7 @@ the whole list. Each directory can contain:
 
 ```
 cue.toml            site defaults: partition, cpus, memory, throttle, ...
-software/<name>.toml   one file per task (or flat <name>.toml)
+tasks/<name>.toml      one file per task (or flat <name>.toml)
 ```
 
 **`cue.toml`**, site-level settings:
@@ -244,10 +244,10 @@ max_array_size = 5000    # refuse larger submissions before slurm does
 record_limit = 100       # auto-recorded job files kept in <outdir>/.rec/
 ```
 
-**`software/<name>.toml`**, the full software definition:
+**`tasks/<name>.toml`**, the full task definition:
 
 ```toml
-[software]
+[task]
 extensions = [".inp"]
 # secondary_extensions = [".mol"]   # paired inputs (dalton, dirac)
 
@@ -274,7 +274,7 @@ rules = [
 ```
 
 Jobs start with a clean environment (`--export=NONE`); everything the
-software needs goes in `setup`. See `configs/software/example.toml` for
+software needs goes in `setup`. See `configs/tasks/example.toml` for
 every key, including per-partition node exclusion under `[slurm]`. Check
 any config with `cue <name> --dry-run input` before submitting.
 
@@ -363,10 +363,10 @@ All shipped with placeholder paths, fill in your cluster's locations.
 
 ## Migrating from the old scripts
 
-`migrate.py` drafts a software config from an old bash submit script:
+`migrate.py` drafts a task config from an old bash submit script:
 
 ```
-python3 migrate.py ~/bin/sorca > ~/.config/cue/software/orca.toml
+python3 migrate.py ~/bin/sorca > ~/.config/cue/tasks/orca.toml
 ```
 
 Best effort: it extracts paths, module loads, resource defaults, the run
@@ -383,7 +383,7 @@ make check       # black, ruff, mypy --strict
 ```
 
 The golden files in `tests/expected/` are the specification of the
-generated sbatch scripts. See CONTRIBUTING.md for adding software configs
+generated sbatch scripts. See CONTRIBUTING.md for adding task configs
 and changing the engine.
 
 ## License

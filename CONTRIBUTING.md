@@ -1,13 +1,13 @@
 # contributing
 
-Contributions are welcome: new software configs, better error messages, docs, or
+Contributions are welcome: new task configs, better error messages, docs, or
 engine fixes. Adding support for a new software needs no Python at all.
 
-## Adding or improving a software config
+## Adding or improving a task config
 
 This is the most useful contribution and works without touching code.
 
-1. Copy `configs/software/example.toml` to `<name>.toml` in one of your
+1. Copy `configs/tasks/example.toml` to `<name>.toml` in one of your
    config directories (`cue list` shows them; `~/bin/<name>.toml` works
    too).
 2. Fill in the paths, module loads, and run command for the software.
@@ -25,7 +25,7 @@ This is the most useful contribution and works without touching code.
    works.
 4. Submit a small real job and check the results.
 5. When it works, replace the site-specific paths with `/path/to/...`
-   placeholders and a short comment, copy the file into `configs/software/`
+   placeholders and a short comment, copy the file into `configs/tasks/`
    in this repo, and open a pull request (or send the file to the
    maintainer). Keep your working copy with real paths in your own config
    directory.
@@ -98,7 +98,7 @@ One change per commit. Message is a single short lowercase imperative
 sentence, no prefix, no trailing period:
 
 ```
-add dalton software config
+add dalton task config
 fix exclude_file whitespace handling
 ```
 

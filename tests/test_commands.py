@@ -234,18 +234,16 @@ class ListModeTests(unittest.TestCase):
         os.chdir(self._tmp.name)
         self.addCleanup(os.chdir, self._old_cwd)
         config = Path("cfg")
-        (config / "software").mkdir(parents=True)
+        (config / "tasks").mkdir(parents=True)
         good_dir = Path("goodbin").resolve()
         good_dir.mkdir()
-        (config / "software" / "good.toml").write_text(
+        (config / "tasks" / "good.toml").write_text(
             f"[paths]\nbin = '{good_dir}'\n[execution]\ncommand = '\"{{bin}}/x\" \"{{input}}\"'\n"
         )
-        (config / "software" / "gone.toml").write_text(
+        (config / "tasks" / "gone.toml").write_text(
             "[paths]\nbin = '/nonexistent/dir'\n[execution]\ncommand = '\"{bin}/x\" \"{input}\"'\n"
         )
-        (config / "software" / "broken.toml").write_text(
-            "[execution]\nscratch = true\n"
-        )
+        (config / "tasks" / "broken.toml").write_text("[execution]\nscratch = true\n")
         patcher = mock.patch.dict(os.environ, {cue.CONFIG_PATH_ENV: str(config)})
         patcher.start()
         self.addCleanup(patcher.stop)

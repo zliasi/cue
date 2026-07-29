@@ -193,21 +193,21 @@ class GoldenTests(TempCwdTestCase):
 
 class ShippedConfigTests(unittest.TestCase):
     def test_all_shipped_configs_parse_and_render(self) -> None:
-        software_dir = TESTS_DIR.parent / "configs" / "software"
-        for path in sorted(software_dir.glob("*.toml")):
+        tasks_dir = TESTS_DIR.parent / "configs" / "tasks"
+        for path in sorted(tasks_dir.glob("*.toml")):
             with self.subTest(config=path.name):
-                software = cue.parse_software_config(path, path.stem)
-                self.assertTrue(software.command)
+                task = cue.parse_task_config(path, path.stem)
+                self.assertTrue(task.command)
                 values = {key: "x" for key in cue.ENGINE_PLACEHOLDERS}
-                values.update(software.paths)
+                values.update(task.paths)
                 # unknown placeholders in shipped configs must fail here,
                 # not on a user's first submission.
-                cue.substitute(software.setup, values, path.name)
-                cue.substitute(software.command, values, path.name)
+                cue.substitute(task.setup, values, path.name)
+                cue.substitute(task.command, values, path.name)
 
 
 class ValidationTests(TempCwdTestCase):
-    def test_unknown_software(self) -> None:
+    def test_unknown_task(self) -> None:
         code, _, stderr = run_cue(["orcaa", "h2o.inp"])
         self.assertEqual(code, 1)
         self.assertIn('unknown task "orcaa"', stderr)
@@ -259,9 +259,9 @@ class ValidationTests(TempCwdTestCase):
 
     def test_max_array_size(self) -> None:
         config = Path("localconfig")
-        (config / "software").mkdir(parents=True)
+        (config / "tasks").mkdir(parents=True)
         (config / "cue.toml").write_text("[defaults]\nmax_array_size = 2\n")
-        (config / "software" / "run.toml").write_text(
+        (config / "tasks" / "run.toml").write_text(
             "[execution]\ncommand = 'bash \"{input}\"'\n"
         )
         self.touch("a.sh", "b.sh", "c.sh")
@@ -272,9 +272,9 @@ class ValidationTests(TempCwdTestCase):
 
     def test_max_cpus(self) -> None:
         config = Path("localconfig")
-        (config / "software").mkdir(parents=True)
+        (config / "tasks").mkdir(parents=True)
         (config / "cue.toml").write_text("[defaults]\nmax_cpus = 4\n")
-        (config / "software" / "run.toml").write_text(
+        (config / "tasks" / "run.toml").write_text(
             "[execution]\ncommand = 'bash \"{input}\"'\n"
         )
         self.touch("a.sh")
@@ -381,11 +381,9 @@ class InjectTests(TempCwdTestCase):
     def test_multiline_pal_block_replaced(self) -> None:
         Path("h2o.inp").write_text("%pal\n  nprocs 8\nend\n! hf\n")
         values = {"cpus": "4", "inject_memory_mb_per_cpu": "1536"}
-        software = cue.parse_software_config(
-            CONFIG_DIR / "software" / "orca.toml", "orca"
-        )
+        task = cue.parse_task_config(CONFIG_DIR / "tasks" / "orca.toml", "orca")
         result = cue.apply_inject_rules(
-            "%pal\n  nprocs 8\nend\n! hf\n", software, values, "h2o.inp"
+            "%pal\n  nprocs 8\nend\n! hf\n", task, values, "h2o.inp"
         )
         self.assertIn("%pal nprocs 4 end", result)
         self.assertNotIn("nprocs 8", result)
@@ -396,12 +394,10 @@ class InjectTests(TempCwdTestCase):
             ["gaussian", "h2o.com", "-c", "8", "-m", "16"]
         )
         self.assertEqual(code, 0, stderr)
-        software = cue.parse_software_config(
-            CONFIG_DIR / "software" / "gaussian.toml", "gaussian"
-        )
+        task = cue.parse_task_config(CONFIG_DIR / "tasks" / "gaussian.toml", "gaussian")
         values = {"cpus": "8", "inject_memory_mb": "13926"}
         result = cue.apply_inject_rules(
-            Path("h2o.com").read_text(), software, values, "h2o.com"
+            Path("h2o.com").read_text(), task, values, "h2o.com"
         )
         self.assertIn("%nprocshared=8", result)
         self.assertIn("%mem=13926MB", result)
@@ -499,9 +495,9 @@ class JobFileTests(TempCwdTestCase):
     def test_auto_record_prunes_oldest(self) -> None:
         self._install_fake_sbatch()
         config = Path("localconfig")
-        (config / "software").mkdir(parents=True)
+        (config / "tasks").mkdir(parents=True)
         (config / "cue.toml").write_text("[defaults]\nrecord_limit = 2\n")
-        (config / "software" / "run.toml").write_text(
+        (config / "tasks" / "run.toml").write_text(
             "[execution]\ncommand = 'bash \"{input}\"'\n"
         )
         record_dir = Path("out/.rec")
@@ -563,9 +559,9 @@ class StemParentTests(TempCwdTestCase):
 
     def test_invalid_stem_value(self) -> None:
         config = Path("localconfig")
-        (config / "software").mkdir(parents=True)
-        (config / "software" / "bad.toml").write_text(
-            '[software]\nstem = "folder"\n[execution]\ncommand = "x"\n'
+        (config / "tasks").mkdir(parents=True)
+        (config / "tasks" / "bad.toml").write_text(
+            '[task]\nstem = "folder"\n[execution]\ncommand = "x"\n'
         )
         self.touch("a/control")
         with mock.patch.dict(os.environ, {cue.CONFIG_PATH_ENV: str(config)}):
@@ -575,9 +571,9 @@ class StemParentTests(TempCwdTestCase):
 
     def test_parent_rejects_inject_rules(self) -> None:
         config = Path("localconfig")
-        (config / "software").mkdir(parents=True)
-        (config / "software" / "bad.toml").write_text(
-            '[software]\nstem = "parent"\n[execution]\ncommand = "x"\n'
+        (config / "tasks").mkdir(parents=True)
+        (config / "tasks" / "bad.toml").write_text(
+            '[task]\nstem = "parent"\n[execution]\ncommand = "x"\n'
             "[inject]\nrules = ["
             "{ match = '^%mem', write = \"%mem {inject_memory_mb}\" }]\n"
         )
@@ -710,11 +706,11 @@ class OutdirLogdirTests(TempCwdTestCase):
 
     def test_config_precedence(self) -> None:
         config = Path("localconfig")
-        (config / "software").mkdir(parents=True)
+        (config / "tasks").mkdir(parents=True)
         (config / "cue.toml").write_text(
             '[defaults]\noutdir = "siteout"\nlogdir = "sitelog"\n'
         )
-        (config / "software" / "mytask.toml").write_text(
+        (config / "tasks" / "mytask.toml").write_text(
             '[execution]\ncommand = \'bash "{input}"\'\noutdir = "taskout"\n'
         )
         self.touch("run.sh")
@@ -859,15 +855,15 @@ class SetFlagTests(TempCwdTestCase):
 
 
 class ConfigTests(TempCwdTestCase):
-    def write_software(self, body: str) -> Path:
+    def write_task(self, body: str) -> Path:
         config = Path("localconfig")
-        (config / "software").mkdir(parents=True, exist_ok=True)
-        path = config / "software" / "bad.toml"
+        (config / "tasks").mkdir(parents=True, exist_ok=True)
+        path = config / "tasks" / "bad.toml"
         path.write_text(body)
         return config
 
     def run_bad(self, body: str) -> str:
-        config = self.write_software(body)
+        config = self.write_task(body)
         self.touch("a.sh")
         with mock.patch.dict(os.environ, {cue.CONFIG_PATH_ENV: str(config)}):
             code, _, stderr = run_cue(["bad", "a.sh", "--dry-run"])
@@ -914,14 +910,14 @@ class ConfigTests(TempCwdTestCase):
         self.assertEqual(site.memory_gb, 8)
 
     def test_discover_first_dir_wins(self) -> None:
-        high = Path("high/software")
-        low = Path("low/software")
+        high = Path("high/tasks")
+        low = Path("low/tasks")
         high.mkdir(parents=True)
         low.mkdir(parents=True)
         (high / "orca.toml").write_text("")
         (low / "orca.toml").write_text("")
         (low / "xtb.toml").write_text("")
-        found = cue.discover_software([Path("high"), Path("low")])
+        found = cue.discover_tasks([Path("high"), Path("low")])
         self.assertEqual(found["orca"], high / "orca.toml")
         self.assertEqual(found["xtb"], low / "xtb.toml")
 
@@ -995,10 +991,10 @@ class SearchPathTests(unittest.TestCase):
             bin_dir.mkdir()
             (bin_dir / "orca.toml").write_text("")
             (bin_dir / "cue.toml").write_text("")
-            found = cue.discover_software([bin_dir])
+            found = cue.discover_tasks([bin_dir])
             self.assertEqual(found, {"orca": bin_dir / "orca.toml"})
             self.assertEqual(
-                cue.find_software_config("orca", [bin_dir]),
+                cue.find_task_config("orca", [bin_dir]),
                 bin_dir / "orca.toml",
             )
 
@@ -1029,9 +1025,9 @@ class InitTests(TempCwdTestCase):
 class LinkTests(TempCwdTestCase):
     def test_link_creates_symlinks_and_skips_reserved(self) -> None:
         config = Path("cfg")
-        (config / "software").mkdir(parents=True)
-        (config / "software" / "orca.toml").write_text("")
-        (config / "software" / "list.toml").write_text("")
+        (config / "tasks").mkdir(parents=True)
+        (config / "tasks" / "orca.toml").write_text("")
+        (config / "tasks" / "list.toml").write_text("")
         with mock.patch.dict(os.environ, {cue.CONFIG_PATH_ENV: str(config)}):
             code, _, stderr = run_cue(["link", "--dir", "bin"])
         self.assertEqual(code, 0, stderr)
@@ -1043,8 +1039,8 @@ class LinkTests(TempCwdTestCase):
 
     def test_list_marks_shadowed_config(self) -> None:
         config = Path("cfg")
-        (config / "software").mkdir(parents=True)
-        (config / "software" / "list.toml").write_text("")
+        (config / "tasks").mkdir(parents=True)
+        (config / "tasks" / "list.toml").write_text("")
         with mock.patch.dict(os.environ, {cue.CONFIG_PATH_ENV: str(config)}):
             code, stdout, _ = run_cue(["list"])
         self.assertEqual(code, 0)

@@ -2,13 +2,13 @@
 """
 cue: submit computational chemistry jobs to Slurm.
 
-Single-file launcher. All software-specific knowledge (executables, module
+Single-file launcher. All task-specific knowledge (executables, module
 loads, scratch policy, retrieved files) lives in TOML config files. This file
 only discovers configs, validates input, renders an sbatch script, and
 submits it.
 
-Minimum setup: this file plus one software config, for example
-~/.config/cue/software/orca.toml or a plain ~/bin/orca.toml. Run
+Minimum setup: this file plus one task config, for example
+~/.config/cue/tasks/orca.toml or a plain ~/bin/orca.toml. Run
 "cue init" to scaffold and "cue list" to see what is available.
 """
 
@@ -38,12 +38,12 @@ CONFIG_PATH_ENV = "CUE_CONFIG_PATH"
 # "cue init --dir"; a pointer written here makes cue find it.
 USER_CONFIG_DIR = "~/.config/cue"
 # Searched when no search_path is configured. ~/bin is included because
-# that is where people traditionally keep their per-software submitters.
+# that is where people traditionally keep their per-task submitters.
 DEFAULT_SEARCH_DIRS = (USER_CONFIG_DIR, "~/bin")
 MAX_BACKUP_INDEX = 99
 SBATCH_TIMEOUT_SECONDS = 60
 
-# Built-in commands. A software config with one of these names can never be
+# Built-in commands. A task config with one of these names can never be
 # submitted, so list and link point that out.
 RESERVED_COMMANDS = frozenset(
     {
@@ -119,7 +119,7 @@ HISTORY_COUNT_LIMIT = 10000
 
 # Slurm time formats: MM, MM:SS, HH:MM:SS, D-HH, D-HH:MM, D-HH:MM:SS.
 TIME_LIMIT_RE = re.compile(r"^\d+(-\d{1,2})?(:\d{2})?(:\d{2})?$")
-SOFTWARE_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+TASK_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 # Characters safe to embed in the generated script and slurm directives.
 INPUT_NAME_RE = re.compile(r"^[A-Za-z0-9._+/-]+$")
 DIR_NAME_RE = re.compile(r"^[A-Za-z0-9._+/-]+$")
@@ -394,8 +394,8 @@ def load_site_defaults(search_path: Sequence[Path]) -> SiteDefaults:
 
 
 @dataclass(frozen=True)
-class SoftwareConfig:
-    """One software definition parsed from a software TOML file."""
+class TaskConfig:
+    """One task definition parsed from a task TOML file."""
 
     name: str
     source: Path
@@ -419,8 +419,8 @@ class SoftwareConfig:
     logdir: str | None
 
 
-_SOFTWARE_TABLES = (
-    "software",
+_TASK_TABLES = (
+    "task",
     "resources",
     "environment",
     "execution",
@@ -432,16 +432,16 @@ _RESOURCE_INT_KEYS = ("cpus", "memory_gb", "ntasks", "nodes", "throttle")
 STAGING_DIR = ".cue-staged"
 
 
-def find_software_config(name: str, search_path: Sequence[Path]) -> Path | None:
+def find_task_config(name: str, search_path: Sequence[Path]) -> Path | None:
     """
-    Return the config for a software name, or None.
+    Return the config for a task name, or None.
 
-    Each directory is checked for software/<name>.toml first and then a
+    Each directory is checked for tasks/<name>.toml first and then a
     flat <name>.toml, so a plain ~/bin/orca.toml works too.
     """
     for directory in search_path:
         for candidate in (
-            directory / "software" / f"{name}.toml",
+            directory / "tasks" / f"{name}.toml",
             directory / f"{name}.toml",
         ):
             if candidate.is_file():
@@ -449,37 +449,35 @@ def find_software_config(name: str, search_path: Sequence[Path]) -> Path | None:
     return None
 
 
-def discover_software(search_path: Sequence[Path]) -> dict[str, Path]:
-    """Map software name to config path. Earlier directories win."""
+def discover_tasks(search_path: Sequence[Path]) -> dict[str, Path]:
+    """Map task name to config path. Earlier directories win."""
     found: dict[str, Path] = {}
     for directory in search_path:
-        for toml_dir in (directory / "software", directory):
+        for toml_dir in (directory / "tasks", directory):
             if not toml_dir.is_dir():
                 continue
             for path in sorted(toml_dir.glob("*.toml")):
-                # cue.toml holds site defaults, not a software.
+                # cue.toml holds site defaults, not a task.
                 if path.name == "cue.toml":
                     continue
                 found.setdefault(path.stem, path)
     return found
 
 
-def parse_software_config(path: Path, name: str) -> SoftwareConfig:
-    """Parse and validate a software TOML file."""
+def parse_task_config(path: Path, name: str) -> TaskConfig:
+    """Parse and validate a task TOML file."""
     data = _load_toml(path)
-    _check_keys(data, _SOFTWARE_TABLES, "top level", path)
+    _check_keys(data, _TASK_TABLES, "top level", path)
 
-    software = _get_table(data, "software", path)
-    _check_keys(
-        software, ("extensions", "secondary_extensions", "stem"), "[software]", path
-    )
+    task = _get_table(data, "task", path)
+    _check_keys(task, ("extensions", "secondary_extensions", "stem"), "[task]", path)
     extensions = tuple(
         ext if ext.startswith(".") else f".{ext}"
-        for ext in _get_str_list(software, "extensions", "[software]", path)
+        for ext in _get_str_list(task, "extensions", "[task]", path)
     )
     secondary_extensions = tuple(
         ext if ext.startswith(".") else f".{ext}"
-        for ext in _get_str_list(software, "secondary_extensions", "[software]", path)
+        for ext in _get_str_list(task, "secondary_extensions", "[task]", path)
     )
     if secondary_extensions and not extensions:
         raise CueError(
@@ -491,9 +489,9 @@ def parse_software_config(path: Path, name: str) -> SoftwareConfig:
             f"{path} lists the same extension in extensions and "
             "secondary_extensions. they must be distinct"
         )
-    stem_mode = _get_str(software, "stem", "[software]", path) or "name"
+    stem_mode = _get_str(task, "stem", "[task]", path) or "name"
     if stem_mode not in ("name", "parent"):
-        raise CueError(f'"stem" in [software] of {path} must be "name" or "parent"')
+        raise CueError(f'"stem" in [task] of {path} must be "name" or "parent"')
     if stem_mode == "parent" and secondary_extensions:
         raise CueError(
             f'{path} combines stem = "parent" with secondary_extensions. '
@@ -639,7 +637,7 @@ def parse_software_config(path: Path, name: str) -> SoftwareConfig:
             "would collide"
         )
 
-    return SoftwareConfig(
+    return TaskConfig(
         name=name,
         source=path,
         command=command,
@@ -664,12 +662,12 @@ def parse_software_config(path: Path, name: str) -> SoftwareConfig:
 
 
 def apply_path_overrides(
-    software: SoftwareConfig, overrides: Sequence[str] | None
-) -> SoftwareConfig:
+    task: TaskConfig, overrides: Sequence[str] | None
+) -> TaskConfig:
     """Apply --set key=value overrides to existing [paths] entries."""
     if not overrides:
-        return software
-    paths = dict(software.paths)
+        return task
+    paths = dict(task.paths)
     for item in overrides:
         key, separator, value = item.partition("=")
         if not separator or not key or not value:
@@ -677,11 +675,11 @@ def apply_path_overrides(
         if key not in paths:
             available = ", ".join(sorted(paths)) or "none"
             raise CueError(
-                f'--set key "{key}" is not in [paths] of {software.source}. '
+                f'--set key "{key}" is not in [paths] of {task.source}. '
                 f"available: {available}"
             )
         paths[key] = os.path.expanduser(value)
-    return dataclasses.replace(software, paths=paths)
+    return dataclasses.replace(task, paths=paths)
 
 
 def substitute(template: str, values: Mapping[str, str], context: str) -> str:
@@ -697,7 +695,7 @@ def substitute(template: str, values: Mapping[str, str], context: str) -> str:
         elif key == "scratch":
             hint = ". set scratch = true in [execution]"
         elif key in ("secondary", "secondary_path"):
-            hint = ". set secondary_extensions in [software]"
+            hint = ". set secondary_extensions in [task]"
         raise CueError(
             f'unknown placeholder "{{{key}}}" in {context}{hint}. '
             f"available: {', '.join(sorted(values))}"
@@ -784,20 +782,18 @@ def _submit_relative(directory: str) -> str:
     return f"$SLURM_SUBMIT_DIR/{directory}"
 
 
-def _placeholder_values(spec: JobSpec, software: SoftwareConfig) -> dict[str, str]:
+def _placeholder_values(spec: JobSpec, task: TaskConfig) -> dict[str, str]:
     values = {
         "input": "$input",
         "input_path": "$input_path",
         "stem": "$stem",
-        "output_dir": (
-            _submit_relative(spec.outdir) if software.scratch else spec.outdir
-        ),
+        "output_dir": (_submit_relative(spec.outdir) if task.scratch else spec.outdir),
         "cpus": str(spec.cpus),
         "ntasks": str(spec.ntasks),
         "nodes": str(spec.nodes),
         "memory_gb": str(spec.memory_gb),
     }
-    if software.scratch:
+    if task.scratch:
         values["scratch"] = "$scratch"
     if spec.secondaries is not None:
         values["secondary"] = "$secondary"
@@ -805,14 +801,12 @@ def _placeholder_values(spec: JobSpec, software: SoftwareConfig) -> dict[str, st
     if spec.launcher is not None:
         values["launcher"] = spec.launcher
     values["args"] = spec.program_args
-    values.update(software.paths)
+    values.update(task.paths)
     return values
 
 
-def render_body(
-    spec: JobSpec, software: SoftwareConfig, site: SiteDefaults
-) -> list[str]:
-    values = _placeholder_values(spec, software)
+def render_body(spec: JobSpec, task: TaskConfig, site: SiteDefaults) -> list[str]:
+    values = _placeholder_values(spec, task)
     secondaries = spec.secondaries
     lines = ["", "set -euo pipefail", ""]
     if spec.array:
@@ -830,23 +824,23 @@ def render_body(
                 'input_path="$(sed -n "${SLURM_ARRAY_TASK_ID}p" '
                 f'"{manifest_name(spec.job_name)}")"'
             )
-            if software.stem_mode == "parent":
+            if task.stem_mode == "parent":
                 lines.append('stem="$(basename "$(dirname "$input_path")")"')
             else:
                 lines.append('stem="$(basename "$input_path")"')
-                if software.extensions:
+                if task.extensions:
                     lines.append('stem="${stem%.*}"')
     else:
         lines.append(f'input_path="{spec.inputs[0]}"')
         if secondaries is not None:
             lines.append(f'secondary_path="{secondaries[0]}"')
         lines.append(f'stem="{spec.stems[0]}"')
-    if not software.scratch:
+    if not task.scratch:
         lines.append('input="$input_path"')
         if secondaries is not None:
             lines.append('secondary="$secondary_path"')
     lines += ["", f'mkdir -p "{spec.outdir}" "{spec.logdir}"']
-    if software.scratch:
+    if task.scratch:
         task_dir = (
             "$SLURM_JOB_ID/$SLURM_ARRAY_TASK_ID" if spec.array else "$SLURM_JOB_ID"
         )
@@ -856,32 +850,30 @@ def render_body(
             'mkdir -p "$scratch"',
         ]
     setup = substitute(
-        software.setup, values, f"[environment].setup of {software.source}"
+        task.setup, values, f"[environment].setup of {task.source}"
     ).strip()
     if setup:
         # module load and activate scripts often trip set -u.
         lines += ["", "set +u", *setup.splitlines(), "set -u"]
-    if software.scratch:
+    if task.scratch:
         lines += ["", 'cp "$input_path" "$scratch/"']
         if secondaries is not None:
             lines.append('cp "$secondary_path" "$scratch/"')
         lines += ['cd "$scratch"', 'input="$(basename "$input_path")"']
         if secondaries is not None:
             lines.append('secondary="$(basename "$secondary_path")"')
-    command = substitute(
-        software.command, values, f"[execution].command of {software.source}"
-    )
+    command = substitute(task.command, values, f"[execution].command of {task.source}")
     lines += ["", command.strip("\n")]
-    if software.retrieve:
+    if task.retrieve:
         lines += [
             "",
-            f"for ext in {' '.join(software.retrieve)}; do",
+            f"for ext in {' '.join(task.retrieve)}; do",
             '  if [[ -f "$stem.$ext" ]]; then',
             f'    cp "$stem.$ext" "{_submit_relative(spec.outdir)}/"',
             "  fi",
             "done",
         ]
-    if software.scratch:
+    if task.scratch:
         lines += ["", 'cd "$SLURM_SUBMIT_DIR"']
         if spec.archive:
             lines.append(f'tar -cJf "{spec.outdir}/$stem.tar.xz" -C "$scratch" .')
@@ -890,9 +882,9 @@ def render_body(
     return lines
 
 
-def render_script(spec: JobSpec, software: SoftwareConfig, site: SiteDefaults) -> str:
+def render_script(spec: JobSpec, task: TaskConfig, site: SiteDefaults) -> str:
     assert spec.inputs, "render_script requires at least one input"
-    lines = render_header(spec) + render_body(spec, software, site)
+    lines = render_header(spec) + render_body(spec, task, site)
     return "\n".join(lines) + "\n"
 
 
@@ -939,7 +931,7 @@ def input_stem(text: str, extensions: tuple[str, ...], mode: str = "name") -> st
 
 
 def validate_inputs(
-    raw_inputs: Sequence[str], software: SoftwareConfig
+    raw_inputs: Sequence[str], task: TaskConfig
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """Validate single-input jobs. Return inputs and their stems."""
     seen: set[str] = set()
@@ -947,30 +939,30 @@ def validate_inputs(
     stems: list[str] = []
     for text in raw_inputs:
         _check_input_file(text)
-        if software.extensions and Path(text).suffix not in software.extensions:
-            expected = ", ".join(software.extensions)
+        if task.extensions and Path(text).suffix not in task.extensions:
+            expected = ", ".join(task.extensions)
             raise CueError(
-                f'"{text}" does not match the {software.name} input '
+                f'"{text}" does not match the {task.name} input '
                 f"extensions ({expected}). check the file, or submit with "
-                "a different software config"
+                "a different task config"
             )
         if text in seen:
             raise CueError(f'input "{text}" given more than once. check the file list')
         seen.add(text)
-        if software.stem_mode == "parent" and Path(text).parent.name in ("", "."):
+        if task.stem_mode == "parent" and Path(text).parent.name in ("", "."):
             raise CueError(
-                f'"{text}" has no calculation directory, and {software.name} '
+                f'"{text}" has no calculation directory, and {task.name} '
                 "names jobs after it. give the directory, e.g. "
                 f"calc1/{Path(text).name}"
             )
-        stem = input_stem(text, software.extensions, software.stem_mode)
+        stem = input_stem(text, task.extensions, task.stem_mode)
         _record_stem(stem_sources, stem, text)
         stems.append(stem)
     return tuple(raw_inputs), tuple(stems)
 
 
 def group_paired_inputs(
-    raw_inputs: Sequence[str], software: SoftwareConfig
+    raw_inputs: Sequence[str], task: TaskConfig
 ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
     """
     Pair primary and secondary inputs by walking the arguments in order.
@@ -979,8 +971,8 @@ def group_paired_inputs(
     one job with it. Return primaries, secondaries, and pair stems, all
     aligned per job.
     """
-    primary_names = ", ".join(software.extensions)
-    secondary_names = ", ".join(software.secondary_extensions)
+    primary_names = ", ".join(task.extensions)
+    secondary_names = ", ".join(task.secondary_extensions)
     primaries: list[str] = []
     secondaries: list[str] = []
     stems: list[str] = []
@@ -991,7 +983,7 @@ def group_paired_inputs(
     for text in raw_inputs:
         _check_input_file(text)
         suffix = Path(text).suffix
-        if suffix in software.extensions:
+        if suffix in task.extensions:
             if current is not None and not current_paired:
                 raise CueError(
                     f'"{current}" has no {secondary_names} file. every '
@@ -999,7 +991,7 @@ def group_paired_inputs(
                 )
             current = text
             current_paired = False
-        elif suffix in software.secondary_extensions:
+        elif suffix in task.secondary_extensions:
             if current is None:
                 raise CueError(
                     f'"{text}" comes before any {primary_names} file. give '
@@ -1014,8 +1006,8 @@ def group_paired_inputs(
                 )
             seen_pairs.add(pair)
             stem = (
-                f"{input_stem(current, software.extensions)}-"
-                f"{input_stem(text, software.secondary_extensions)}"
+                f"{input_stem(current, task.extensions)}-"
+                f"{input_stem(text, task.secondary_extensions)}"
             )
             _record_stem(stem_sources, stem, f"{current} + {text}")
             primaries.append(current)
@@ -1024,7 +1016,7 @@ def group_paired_inputs(
             current_paired = True
         else:
             raise CueError(
-                f'"{text}" does not match the {software.name} input '
+                f'"{text}" does not match the {task.name} input '
                 f"extensions ({primary_names}) or secondary extensions "
                 f"({secondary_names})"
             )
@@ -1037,21 +1029,18 @@ def group_paired_inputs(
     return tuple(primaries), tuple(secondaries), tuple(stems)
 
 
-def resolve_exclude(software: SoftwareConfig, partition: str | None) -> str | None:
+def resolve_exclude(task: TaskConfig, partition: str | None) -> str | None:
     """Resolve the node exclusion list, honouring exclude_partition."""
-    if (
-        software.exclude_partition is not None
-        and partition != software.exclude_partition
-    ):
+    if task.exclude_partition is not None and partition != task.exclude_partition:
         return None
-    if software.exclude:
-        return software.exclude
-    if software.exclude_file:
-        path = Path(software.exclude_file).expanduser()
+    if task.exclude:
+        return task.exclude
+    if task.exclude_file:
+        path = Path(task.exclude_file).expanduser()
         if not path.is_file():
             raise CueError(
                 f"exclude_file {path} not found. fix the path in "
-                f"{software.source} or remove the setting"
+                f"{task.source} or remove the setting"
             )
         nodes = [line.strip() for line in path.read_text().splitlines() if line.strip()]
         return ",".join(nodes) if nodes else None
@@ -1060,13 +1049,13 @@ def resolve_exclude(software: SoftwareConfig, partition: str | None) -> str | No
 
 def _resolve_int(
     cli_value: int | None,
-    software: SoftwareConfig,
+    task: TaskConfig,
     key: str,
     site_value: int,
 ) -> int:
     if cli_value is not None:
         return cli_value
-    value = software.resources.get(key)
+    value = task.resources.get(key)
     if isinstance(value, int):
         return value
     return site_value
@@ -1074,25 +1063,25 @@ def _resolve_int(
 
 def resolve_spec(
     args: argparse.Namespace,
-    software: SoftwareConfig,
+    task: TaskConfig,
     site: SiteDefaults,
     inputs: tuple[str, ...],
     secondaries: tuple[str, ...] | None,
     stems: tuple[str, ...],
 ) -> JobSpec:
-    """Merge CLI flags, software resources, and site defaults into a spec."""
+    """Merge CLI flags, task resources, and site defaults into a spec."""
     if args.time is not None and not TIME_LIMIT_RE.fullmatch(args.time):
         raise CueError(
             f'invalid --time "{args.time}". use D-HH:MM:SS, HH:MM:SS, or '
             "MM, for example 1-00:00:00"
         )
-    cpus = _resolve_int(args.cpus, software, "cpus", site.cpus)
+    cpus = _resolve_int(args.cpus, task, "cpus", site.cpus)
     mem_per_cpu_gb: int | None = args.mem_per_cpu
     if mem_per_cpu_gb is not None:
         # keep {memory_gb} and the limit checks meaningful for configs.
         memory_gb = mem_per_cpu_gb * cpus
     else:
-        memory_gb = _resolve_int(args.memory, software, "memory_gb", site.memory_gb)
+        memory_gb = _resolve_int(args.memory, task, "memory_gb", site.memory_gb)
     if site.max_cpus is not None and cpus > site.max_cpus:
         raise CueError(
             f"requested {cpus} cpus but max_cpus is {site.max_cpus}. lower "
@@ -1125,7 +1114,7 @@ def resolve_spec(
 
     partition = args.partition
     if partition is None:
-        value = software.resources.get("partition")
+        value = task.resources.get("partition")
         partition = value if isinstance(value, str) else site.partition
 
     job_name = args.job_name if args.job_name else stems[0]
@@ -1147,8 +1136,8 @@ def resolve_spec(
             )
         return value
 
-    outdir = resolve_dir(args.outdir, software.outdir, "outdir")
-    logdir = resolve_dir(args.logdir, software.logdir, "logdir")
+    outdir = resolve_dir(args.outdir, task.outdir, "outdir")
+    logdir = resolve_dir(args.logdir, task.logdir, "logdir")
 
     return JobSpec(
         job_name=job_name,
@@ -1156,12 +1145,12 @@ def resolve_spec(
         secondaries=secondaries,
         stems=stems,
         array=len(inputs) > 1,
-        throttle=_resolve_int(args.throttle, software, "throttle", site.throttle),
+        throttle=_resolve_int(args.throttle, task, "throttle", site.throttle),
         cpus=cpus,
         memory_gb=memory_gb,
         mem_per_cpu_gb=mem_per_cpu_gb,
-        ntasks=_resolve_int(args.ntasks, software, "ntasks", site.ntasks),
-        nodes=_resolve_int(args.nodes, software, "nodes", site.nodes),
+        ntasks=_resolve_int(args.ntasks, task, "ntasks", site.ntasks),
+        nodes=_resolve_int(args.nodes, task, "nodes", site.nodes),
         ntasks_per_node=args.ntasks_per_node,
         partition=partition,
         time_limit=args.time,
@@ -1170,17 +1159,17 @@ def resolve_spec(
         mail_type=args.mail_type,
         mail_user=args.mail_user,
         dependency=dependency,
-        exclude=resolve_exclude(software, partition),
-        archive=software.archive and not args.no_archive,
-        launcher=args.launcher or software.launcher,
+        exclude=resolve_exclude(task, partition),
+        archive=task.archive and not args.no_archive,
+        launcher=args.launcher or task.launcher,
         program_args=args.program_args or "",
         outdir=outdir,
         logdir=logdir,
     )
 
 
-def _inject_values(spec: JobSpec, software: SoftwareConfig) -> dict[str, str]:
-    total_mb = int(spec.memory_gb * 1024 * software.inject_memory_fraction)
+def _inject_values(spec: JobSpec, task: TaskConfig) -> dict[str, str]:
+    total_mb = int(spec.memory_gb * 1024 * task.inject_memory_fraction)
     return {
         "cpus": str(spec.cpus),
         "ntasks": str(spec.ntasks),
@@ -1191,7 +1180,7 @@ def _inject_values(spec: JobSpec, software: SoftwareConfig) -> dict[str, str]:
 
 
 def apply_inject_rules(
-    text: str, software: SoftwareConfig, values: Mapping[str, str], source: str
+    text: str, task: TaskConfig, values: Mapping[str, str], source: str
 ) -> str:
     """
     Make resource directives in an input consistent with the job.
@@ -1202,10 +1191,10 @@ def apply_inject_rules(
     # validate every rule against the original text first, so reported
     # line numbers match the user's file.
     plan: list[tuple[re.Pattern[str], str, bool]] = []
-    for pattern, write in software.inject_rules:
+    for pattern, write in task.inject_rules:
         regex = re.compile(pattern)
         matches = list(regex.finditer(text))
-        line = substitute(write, values, f"[inject] rule of {software.source}")
+        line = substitute(write, values, f"[inject] rule of {task.source}")
         if len(matches) > 1:
             numbers = ", ".join(
                 str(text.count("\n", 0, match.start()) + 1) for match in matches
@@ -1224,9 +1213,7 @@ def apply_inject_rules(
     return text
 
 
-def stage_injected_inputs(
-    spec: JobSpec, software: SoftwareConfig, write: bool
-) -> JobSpec:
+def stage_injected_inputs(spec: JobSpec, task: TaskConfig, write: bool) -> JobSpec:
     """
     Rewrite resource directives in staged copies of the primary inputs.
 
@@ -1234,12 +1221,12 @@ def stage_injected_inputs(
     staged copies in .cue-staged/. With write false (dry runs) the
     rules are still applied so errors surface, but nothing is written.
     """
-    if not software.inject_rules:
+    if not task.inject_rules:
         raise CueError(
-            f"--inject-resources needs [inject] rules in {software.source}. "
+            f"--inject-resources needs [inject] rules in {task.source}. "
             "add them, or drop the flag and set the directives by hand"
         )
-    values = _inject_values(spec, software)
+    values = _inject_values(spec, task)
     staging = Path(STAGING_DIR)
     staged_inputs: list[str] = []
     for original in spec.inputs:
@@ -1249,7 +1236,7 @@ def stage_injected_inputs(
             raise CueError(
                 f"{original} is not a text file, cannot inject resources"
             ) from error
-        content = apply_inject_rules(content, software, values, original)
+        content = apply_inject_rules(content, task, values, original)
         target = staging / Path(original).name
         if write:
             staging.mkdir(exist_ok=True)
@@ -2360,15 +2347,15 @@ def _state_summary(tasks: Mapping[int | None, str]) -> str:
 def _rerun_inputs(record: SubmissionRecord, failed_indices: Sequence[int]) -> list[str]:
     """Inputs reproducing exactly the failed array tasks."""
     search_path = resolve_search_path()
-    config_path = find_software_config(record.task, search_path)
+    config_path = find_task_config(record.task, search_path)
     if config_path is None:
         raise CueError(
             f'record {record.path} names task "{record.task}", which has '
             "no config here. cannot build a rerun file"
         )
-    software = parse_software_config(config_path, record.task)
-    if software.secondary_extensions:
-        primaries, secondaries, _ = group_paired_inputs(record.inputs, software)
+    task = parse_task_config(config_path, record.task)
+    if task.secondary_extensions:
+        primaries, secondaries, _ = group_paired_inputs(record.inputs, task)
         rerun: list[str] = []
         for index in failed_indices:
             rerun += [primaries[index - 1], secondaries[index - 1]]
@@ -2528,10 +2515,10 @@ def _positive_int(text: str) -> int:
     return value
 
 
-def build_submit_parser(software_name: str) -> argparse.ArgumentParser:
+def build_submit_parser(task_name: str) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog=f"cue {software_name}",
-        description=f"submit {software_name} job(s) to slurm",
+        prog=f"cue {task_name}",
+        description=f"submit {task_name} job(s) to slurm",
     )
     parser.add_argument("inputs", nargs="*", metavar="input")
     parser.add_argument(
@@ -2614,7 +2601,7 @@ def build_submit_parser(software_name: str) -> argparse.ArgumentParser:
         "--launcher", help="program that runs the input (run-style configs)"
     )
     parser.add_argument(
-        "--variant", help="task variant, uses software/<name>-<variant>.toml"
+        "--variant", help="task variant, uses tasks/<name>-<variant>.toml"
     )
     parser.add_argument(
         "--args",
@@ -2646,11 +2633,11 @@ def build_submit_parser(software_name: str) -> argparse.ArgumentParser:
     return parser
 
 
-def _unknown_software_error(name: str, search_path: Sequence[Path]) -> CueError:
-    discovered = discover_software(search_path)
+def _unknown_task_error(name: str, search_path: Sequence[Path]) -> CueError:
+    discovered = discover_tasks(search_path)
     searched = (
         ", ".join(str(d) for d in search_path)
-        + " (software/ subdirectories and flat .toml files)"
+        + " (tasks/ subdirectories and flat .toml files)"
     )
     if discovered:
         return CueError(
@@ -2681,9 +2668,9 @@ def _submission_lock(output_dir: Path) -> Iterator[None]:
             fcntl.flock(handle, fcntl.LOCK_UN)
 
 
-def cmd_submit(software_name: str, argv: Sequence[str]) -> int:
+def cmd_submit(task_name: str, argv: Sequence[str]) -> int:
     """Validate, render, and submit one job or one array."""
-    args = build_submit_parser(software_name).parse_args(list(argv))
+    args = build_submit_parser(task_name).parse_args(list(argv))
     if args.manifest:
         args.inputs = list(args.inputs) + read_manifest(
             Path(args.manifest).expanduser()
@@ -2697,40 +2684,40 @@ def cmd_submit(software_name: str, argv: Sequence[str]) -> int:
             "the job file"
         )
     if args.variant:
-        software_name = f"{software_name}-{args.variant}"
-    if file_task is not None and file_task != software_name:
+        task_name = f"{task_name}-{args.variant}"
+    if file_task is not None and file_task != task_name:
         raise CueError(
-            f'the job file is for task "{file_task}" but "{software_name}" '
+            f'the job file is for task "{file_task}" but "{task_name}" '
             f'was invoked. use "cue {file_task} -f {args.job_file}" or '
             "remove the task line"
         )
-    if not SOFTWARE_NAME_RE.fullmatch(software_name):
+    if not TASK_NAME_RE.fullmatch(task_name):
         raise CueError(
-            f'invalid task name "{software_name}". use lowercase '
+            f'invalid task name "{task_name}". use lowercase '
             "letters, digits, hyphens, dots, and underscores"
         )
     search_path = resolve_search_path()
     site = load_site_defaults(search_path)
-    config_path = find_software_config(software_name, search_path)
+    config_path = find_task_config(task_name, search_path)
     if config_path is None:
-        raise _unknown_software_error(software_name, search_path)
-    software = parse_software_config(config_path, software_name)
-    software = apply_path_overrides(software, args.overrides)
-    if args.program_args and "{args}" not in software.command:
+        raise _unknown_task_error(task_name, search_path)
+    task = parse_task_config(config_path, task_name)
+    task = apply_path_overrides(task, args.overrides)
+    if args.program_args and "{args}" not in task.command:
         raise CueError(
-            f"{software.name} does not take --args: its command in "
-            f"{software.source} has no {{args}} placeholder"
+            f"{task.name} does not take --args: its command in "
+            f"{task.source} has no {{args}} placeholder"
         )
-    if software.secondary_extensions:
-        inputs, secondaries, stems = group_paired_inputs(args.inputs, software)
+    if task.secondary_extensions:
+        inputs, secondaries, stems = group_paired_inputs(args.inputs, task)
     else:
-        inputs, stems = validate_inputs(args.inputs, software)
+        inputs, stems = validate_inputs(args.inputs, task)
         secondaries = None
     raw_inputs = list(args.inputs)
-    spec = resolve_spec(args, software, site, inputs, secondaries, stems)
+    spec = resolve_spec(args, task, site, inputs, secondaries, stems)
     if args.inject_resources:
-        spec = stage_injected_inputs(spec, software, write=not args.dry_run)
-    script = render_script(spec, software, site)
+        spec = stage_injected_inputs(spec, task, write=not args.dry_run)
+    script = render_script(spec, task, site)
 
     if args.dry_run:
         print(script, end="")
@@ -2761,9 +2748,7 @@ def cmd_submit(software_name: str, argv: Sequence[str]) -> int:
     else:
         print(f"submitted job {job_id} ({spec.job_name})", file=info)
     try:
-        record_path = record_submission(
-            software_name, args, spec, raw_inputs, site, job_id
-        )
+        record_path = record_submission(task_name, args, spec, raw_inputs, site, job_id)
         if args.record is not None:
             print(f"recorded: {record_path}", file=info)
     except OSError as error:
@@ -2822,12 +2807,12 @@ def cmd_interactive(argv: Sequence[str]) -> int:
 def _check_task_config(path: Path, name: str) -> str:
     """Health check one task config: parse it and probe its paths."""
     try:
-        software = parse_software_config(path, name)
+        task = parse_task_config(path, name)
     except CueError as error:
         return f"config error: {error}"
     missing: list[str] = []
     unchecked = False
-    for key, value in software.paths.items():
+    for key, value in task.paths.items():
         expanded = os.path.expanduser(value)
         if os.path.isabs(expanded):
             if not Path(expanded).exists():
@@ -2835,9 +2820,9 @@ def _check_task_config(path: Path, name: str) -> str:
         else:
             # bare command names need the setup block, cannot be probed.
             unchecked = True
-    if software.exclude_file:
-        if not Path(os.path.expanduser(software.exclude_file)).exists():
-            missing.append(f"exclude_file -> {software.exclude_file}")
+    if task.exclude_file:
+        if not Path(os.path.expanduser(task.exclude_file)).exists():
+            missing.append(f"exclude_file -> {task.exclude_file}")
     if missing:
         return "missing: " + ", ".join(missing)
     if unchecked:
@@ -2874,14 +2859,14 @@ def cmd_list(argv: Sequence[str]) -> int:
             print(name)
         return 0
     if args.names:
-        for name in sorted(discover_software(search_path)):
+        for name in sorted(discover_tasks(search_path)):
             print(name)
         return 0
     print("config search path:")
     for index, directory in enumerate(search_path, start=1):
         note = "" if directory.is_dir() else "  (missing)"
         print(f"  {index}. {directory}{note}")
-    discovered = discover_software(search_path)
+    discovered = discover_tasks(search_path)
     if not discovered:
         print()
         print(
@@ -2917,16 +2902,16 @@ def cmd_link(argv: Sequence[str]) -> int:
         description=("create shorthand symlinks so that e.g. sorca means cue orca"),
     )
     parser.add_argument(
-        "software",
+        "tasks",
         nargs="*",
         help="tasks to link (default: all available, plus int and q)",
     )
     parser.add_argument("--dir", default="~/bin", help="directory for the symlinks")
     args = parser.parse_args(list(argv))
     search_path = resolve_search_path()
-    discovered = discover_software(search_path)
-    if args.software:
-        names = list(args.software)
+    discovered = discover_tasks(search_path)
+    if args.tasks:
+        names = list(args.tasks)
     else:
         # a reserved-named config can never be dispatched, so do not link it.
         names = sorted(n for n in discovered if n not in RESERVED_COMMANDS)
@@ -2937,7 +2922,7 @@ def cmd_link(argv: Sequence[str]) -> int:
         )
     for name in names:
         if name not in discovered and name not in ("int", "interactive", "q"):
-            raise _unknown_software_error(name, search_path)
+            raise _unknown_task_error(name, search_path)
     target = Path(__file__).resolve()
     directory = Path(args.dir).expanduser()
     if not directory.is_absolute():
@@ -2971,7 +2956,7 @@ INIT_CUE_TOML = """\
 
 # directories searched for configs, in order. first match wins. add your
 # own directory or shared group directories, for example:
-# search_path = ["~/my-configs", "~/.config/cue", "/software/mygroup/cue"]
+# search_path = ["~/my-configs", "~/.config/cue", "/task/mygroup/cue"]
 # when unset, ~/.config/cue and ~/bin are searched. note that
 # search_path only takes effect in ~/.config/cue/cue.toml.
 # search_path = ["~/.config/cue", "~/bin"]
@@ -3009,13 +2994,13 @@ launcher = "bash"
 """
 
 INIT_EXAMPLE_TOML = """\
-# reference for writing a software config. copy to <name>.toml and edit.
+# reference for writing a task config. copy to <name>.toml and edit.
 # every available key is shown. optional ones are commented out.
 
-[software]
+[task]
 # accepted input extensions. empty or omitted means accept any file.
 extensions = [".in"]
-# paired-input software (dalton, dirac) also takes geometry files, one
+# paired-input task (dalton, dirac) also takes geometry files, one
 # job per (calculation, geometry) pair, available as {secondary}.
 # secondary_extensions = [".mol"]
 # job stems come from the input filename ("name", default) or from the
@@ -3024,7 +3009,7 @@ extensions = [".in"]
 # stem = "name"
 
 [resources]
-# defaults for this software, override the site defaults in cue.toml.
+# defaults for this task, override the site defaults in cue.toml.
 # command-line flags override both.
 cpus = 1
 memory_gb = 2
@@ -3128,8 +3113,8 @@ def cmd_init(argv: Sequence[str]) -> int:
         base = Path.cwd() / base
     files = {
         base / "cue.toml": INIT_CUE_TOML,
-        base / "software" / "run.toml": INIT_RUN_TOML,
-        base / "software" / "example.toml": INIT_EXAMPLE_TOML,
+        base / "tasks" / "run.toml": INIT_RUN_TOML,
+        base / "tasks" / "example.toml": INIT_EXAMPLE_TOML,
     }
     for path, content in files.items():
         if path.exists():
@@ -3140,9 +3125,7 @@ def cmd_init(argv: Sequence[str]) -> int:
         print(f"created: {path}")
     if base != Path(USER_CONFIG_DIR).expanduser():
         _write_bootstrap_pointer(base)
-    print(
-        "next: edit cue.toml, then add software configs under " f"{base / 'software'}"
-    )
+    print("next: edit cue.toml, then add task configs under " f"{base / 'task'}")
     return 0
 
 
