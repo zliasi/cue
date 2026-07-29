@@ -3125,7 +3125,7 @@ def cmd_init(argv: Sequence[str]) -> int:
         print(f"created: {path}")
     if base != Path(USER_CONFIG_DIR).expanduser():
         _write_bootstrap_pointer(base)
-    print("next: edit cue.toml, then add task configs under " f"{base / 'task'}")
+    print("next: edit cue.toml, then add task configs under " f"{base / 'tasks'}")
     return 0
 
 
