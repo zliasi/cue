@@ -1019,7 +1019,49 @@ class InitTests(TempCwdTestCase):
         code, stdout, stderr = self._run_in_home(["init", "--dir", "other"])
         self.assertEqual(code, 0, stderr)
         self.assertIn(str(Path.cwd() / "other"), stdout)
+        self.assertIn("--force", stdout)
         self.assertEqual((boot_dir / "cue.toml").read_text(), 'search_path = ["/x"]\n')
+
+    def test_force_replaces_pointer(self) -> None:
+        boot_dir = Path(".config/cue")
+        boot_dir.mkdir(parents=True)
+        (boot_dir / "cue.toml").write_text('search_path = ["/x"]\n')
+        code, stdout, stderr = self._run_in_home(["init", "--dir", "other", "--force"])
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("updated:", stdout)
+        content = (boot_dir / "cue.toml").read_text()
+        self.assertIn(str(Path.cwd() / "other"), content)
+        self.assertNotIn('"/x"', content)
+
+    def test_force_refuses_to_drop_defaults(self) -> None:
+        boot_dir = Path(".config/cue")
+        boot_dir.mkdir(parents=True)
+        (boot_dir / "cue.toml").write_text(
+            'search_path = ["/x"]\n[defaults]\ncpus = 4\n'
+        )
+        code, _, stderr = self._run_in_home(["init", "--dir", "other", "--force"])
+        self.assertEqual(code, 1)
+        self.assertIn("refusing", stderr)
+        self.assertIn("cpus = 4", (boot_dir / "cue.toml").read_text())
+
+
+class ExampleProtectionTests(TempCwdTestCase):
+    def test_example_never_listed_or_submitted(self) -> None:
+        config = Path("cfg")
+        (config / "tasks").mkdir(parents=True)
+        (config / "tasks" / "example.toml").write_text("[execution]\ncommand = 'x'\n")
+        (config / "example.toml").write_text("[execution]\ncommand = 'x'\n")
+        (config / "tasks" / "mytask.toml").write_text(
+            "[execution]\ncommand = 'bash \"{input}\"'\n"
+        )
+        self.touch("a.sh")
+        with mock.patch.dict(os.environ, {cue.CONFIG_PATH_ENV: str(config)}):
+            found = cue.discover_tasks([config])
+            self.assertEqual(set(found), {"mytask"})
+            self.assertIsNone(cue.find_task_config("example", [config]))
+            code, _, stderr = run_cue(["example", "a.sh", "--dry-run"])
+        self.assertEqual(code, 1)
+        self.assertIn('unknown task "example"', stderr)
 
 
 class LinkTests(TempCwdTestCase):

@@ -7,6 +7,9 @@
 - the generic runner task is renamed from exec to run
 - task configs live in tasks/ (was software/) and start with a [task]
   table (was [software])
+- example.toml is protected reference documentation, never listed as a
+  task or submittable
+- init --force replaces an existing search_path pointer with --dir
 - new adf task config: the whole amsterdam modeling suite via the ams
   driver
 - configurable output and slurm log directories: -o/--out/--outdir and

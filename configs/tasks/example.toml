@@ -1,5 +1,6 @@
 # reference for writing a task config. copy to <name>.toml and edit.
 # every available key is shown. optional ones are commented out.
+# the name is protected: cue never lists or submits example.toml.
 
 [task]
 # accepted input extensions. empty or omitted means accept any file.

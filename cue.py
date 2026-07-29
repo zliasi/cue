@@ -437,8 +437,11 @@ def find_task_config(name: str, search_path: Sequence[Path]) -> Path | None:
     Return the config for a task name, or None.
 
     Each directory is checked for tasks/<name>.toml first and then a
-    flat <name>.toml, so a plain ~/bin/orca.toml works too.
+    flat <name>.toml, so a plain ~/bin/orca.toml works too. "example"
+    is protected: example.toml is reference documentation, never a task.
     """
+    if name == "example":
+        return None
     for directory in search_path:
         for candidate in (
             directory / "tasks" / f"{name}.toml",
@@ -457,8 +460,9 @@ def discover_tasks(search_path: Sequence[Path]) -> dict[str, Path]:
             if not toml_dir.is_dir():
                 continue
             for path in sorted(toml_dir.glob("*.toml")):
-                # cue.toml holds site defaults, not a task.
-                if path.name == "cue.toml":
+                # cue.toml holds site defaults and example.toml is
+                # reference documentation, neither is a task.
+                if path.name in ("cue.toml", "example.toml"):
                     continue
                 found.setdefault(path.stem, path)
     return found
@@ -2996,6 +3000,7 @@ launcher = "bash"
 INIT_EXAMPLE_TOML = """\
 # reference for writing a task config. copy to <name>.toml and edit.
 # every available key is shown. optional ones are commented out.
+# the name is protected: cue never lists or submits example.toml.
 
 [task]
 # accepted input extensions. empty or omitted means accept any file.
@@ -3075,16 +3080,17 @@ retrieve = []
 """
 
 
-def _write_bootstrap_pointer(chosen_dir: Path) -> None:
+def _write_bootstrap_pointer(chosen_dir: Path, force: bool = False) -> None:
     """Make a custom config directory findable via the bootstrap file."""
     bootstrap = Path(USER_CONFIG_DIR).expanduser() / "cue.toml"
+    pointer_text = (
+        "# points cue at your chosen config directory.\n"
+        "# edit search_path to change or add locations.\n"
+        f'search_path = ["{chosen_dir}"]\n'
+    )
     if not bootstrap.exists():
         bootstrap.parent.mkdir(parents=True, exist_ok=True)
-        bootstrap.write_text(
-            "# points cue at your chosen config directory.\n"
-            "# edit search_path to change or add locations.\n"
-            f'search_path = ["{chosen_dir}"]\n'
-        )
+        bootstrap.write_text(pointer_text)
         print(f"created: {bootstrap} (points at {chosen_dir})")
         return
     data = _load_toml(bootstrap)
@@ -3092,7 +3098,21 @@ def _write_bootstrap_pointer(chosen_dir: Path) -> None:
     known = {str(Path(part).expanduser()) for part in listed}
     if str(chosen_dir) in known:
         return
-    print(f'note: add "{chosen_dir}" to search_path in {bootstrap}')
+    if force:
+        if set(data) - {"search_path"}:
+            raise CueError(
+                f"{bootstrap} holds more than a search_path (defaults or "
+                "partitions), refusing to rewrite it. edit its "
+                "search_path yourself"
+            )
+        bootstrap.write_text(pointer_text)
+        joined = ", ".join(listed) or "unset"
+        print(f"updated: {bootstrap} (points at {chosen_dir}, was {joined})")
+        return
+    print(
+        f'note: add "{chosen_dir}" to search_path in {bootstrap}, '
+        "or rerun with --force to replace it"
+    )
 
 
 def cmd_init(argv: Sequence[str]) -> int:
@@ -3105,6 +3125,11 @@ def cmd_init(argv: Sequence[str]) -> int:
         "--dir",
         default=USER_CONFIG_DIR,
         help=f"config directory to create (default: {USER_CONFIG_DIR})",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="replace an existing search_path pointer with --dir",
     )
     args = parser.parse_args(list(argv))
     base = Path(args.dir).expanduser()
@@ -3124,7 +3149,7 @@ def cmd_init(argv: Sequence[str]) -> int:
         path.write_text(content)
         print(f"created: {path}")
     if base != Path(USER_CONFIG_DIR).expanduser():
-        _write_bootstrap_pointer(base)
+        _write_bootstrap_pointer(base, force=args.force)
     print("next: edit cue.toml, then add task configs under " f"{base / 'tasks'}")
     return 0
 
