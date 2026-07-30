@@ -16,6 +16,19 @@ stem="$(basename "$input_path")"
 stem="${stem%.*}"
 input="$input_path"
 
+printf '%s\n' 'cue 0.2.0'
+printf 'command     %s\n' 'cue gpaw a.py b.py --dry-run'
+printf 'job name    %s\n' a
+printf 'job id      %s\n' "${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
+printf 'task        %s\n' gpaw
+printf 'input       %s\n' "$input_path"
+printf 'node        %s\n' "$(hostname)"
+printf 'partition   %s\n' "$SLURM_JOB_PARTITION"
+printf 'cpus        %s\n' 1
+printf 'memory      %s\n' '2 GB'
+printf 'user        %s\n' "$USER"
+printf 'started     %s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
+
 mkdir -p "out" "log"
 
 set +u
@@ -23,6 +36,8 @@ export OPENBLAS_NUM_THREADS=1
 set -u
 
 mpirun -np "$SLURM_NTASKS" gpaw python -- "$input"
+
+printf 'finished    %s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
 
 sleep 2
 sacct -n -j "$SLURM_JOB_ID" --format=JobID,JobName,MaxRSS,Elapsed,CPUTime --units=MB || true

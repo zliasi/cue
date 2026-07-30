@@ -2,6 +2,10 @@
 
 ## unreleased
 
+- job logs open with an information block: cue version, the submit
+  command, job name and id, task, input, node, partition, resources,
+  user, and start time; retrieved files and a finish time are printed
+  too
 - the project is renamed to cue: cue.py, cue.toml, ~/.config/cue,
   CUE_CONFIG_PATH, and .cue job files
 - the generic runner task is renamed from exec to run

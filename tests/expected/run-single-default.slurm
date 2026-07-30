@@ -14,9 +14,24 @@ input_path="hello.sh"
 stem="hello.sh"
 input="$input_path"
 
+printf '%s\n' 'cue 0.2.0'
+printf 'command     %s\n' 'cue run hello.sh --dry-run'
+printf 'job name    %s\n' hello.sh
+printf 'job id      %s\n' "$SLURM_JOB_ID"
+printf 'task        %s\n' run
+printf 'input       %s\n' "$input_path"
+printf 'node        %s\n' "$(hostname)"
+printf 'partition   %s\n' "$SLURM_JOB_PARTITION"
+printf 'cpus        %s\n' 1
+printf 'memory      %s\n' '2 GB'
+printf 'user        %s\n' "$USER"
+printf 'started     %s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
+
 mkdir -p "out" "log"
 
 bash "$input"
+
+printf 'finished    %s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
 
 sleep 2
 sacct -n -j "$SLURM_JOB_ID" --format=JobID,JobName,MaxRSS,Elapsed,CPUTime --units=MB || true

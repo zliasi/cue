@@ -809,7 +809,41 @@ def _placeholder_values(spec: JobSpec, task: TaskConfig) -> dict[str, str]:
     return values
 
 
-def render_body(spec: JobSpec, task: TaskConfig, site: SiteDefaults) -> list[str]:
+def _info_lines(spec: JobSpec, task: TaskConfig, command_text: str) -> list[str]:
+    """The job information block printed at the top of the log."""
+    if spec.array:
+        job_id = '"${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}"'
+    else:
+        job_id = '"$SLURM_JOB_ID"'
+    if spec.mem_per_cpu_gb is not None:
+        memory = f"{spec.mem_per_cpu_gb} GB per core"
+    else:
+        memory = f"{spec.memory_gb} GB"
+    rows = [
+        ("command", shlex.quote(command_text)),
+        ("job name", shlex.quote(spec.job_name)),
+        ("job id", job_id),
+        ("task", shlex.quote(task.name)),
+        ("input", '"$input_path"'),
+        ("node", '"$(hostname)"'),
+        ("partition", '"$SLURM_JOB_PARTITION"'),
+        ("cpus", str(spec.cpus)),
+        ("memory", shlex.quote(memory)),
+    ]
+    if spec.time_limit:
+        rows.append(("time limit", shlex.quote(spec.time_limit)))
+    rows += [
+        ("user", '"$USER"'),
+        ("started", "\"$(date '+%Y-%m-%d %H:%M:%S')\""),
+    ]
+    lines = ["", f"printf '%s\\n' 'cue {__version__}'"]
+    lines += [f"printf '{key:<12}%s\\n' {value}" for key, value in rows]
+    return lines
+
+
+def render_body(
+    spec: JobSpec, task: TaskConfig, site: SiteDefaults, command_text: str
+) -> list[str]:
     values = _placeholder_values(spec, task)
     secondaries = spec.secondaries
     lines = ["", "set -euo pipefail", ""]
@@ -843,6 +877,7 @@ def render_body(spec: JobSpec, task: TaskConfig, site: SiteDefaults) -> list[str
         lines.append('input="$input_path"')
         if secondaries is not None:
             lines.append('secondary="$secondary_path"')
+    lines += _info_lines(spec, task, command_text)
     lines += ["", f'mkdir -p "{spec.outdir}" "{spec.logdir}"']
     if task.scratch:
         task_dir = (
@@ -874,6 +909,7 @@ def render_body(spec: JobSpec, task: TaskConfig, site: SiteDefaults) -> list[str
             f"for ext in {' '.join(task.retrieve)}; do",
             '  if [[ -f "$stem.$ext" ]]; then',
             f'    cp "$stem.$ext" "{_submit_relative(spec.outdir)}/"',
+            "    printf 'retrieved   %s\\n' \"$stem.$ext\"",
             "  fi",
             "done",
         ]
@@ -882,13 +918,16 @@ def render_body(spec: JobSpec, task: TaskConfig, site: SiteDefaults) -> list[str
         if spec.archive:
             lines.append(f'tar -cJf "{spec.outdir}/$stem.tar.xz" -C "$scratch" .')
         lines.append('rm -rf "$scratch"')
+    lines += ["", "printf 'finished    %s\\n' \"$(date '+%Y-%m-%d %H:%M:%S')\""]
     lines += ["", "sleep 2", SACCT_LINE]
     return lines
 
 
-def render_script(spec: JobSpec, task: TaskConfig, site: SiteDefaults) -> str:
+def render_script(
+    spec: JobSpec, task: TaskConfig, site: SiteDefaults, command_text: str
+) -> str:
     assert spec.inputs, "render_script requires at least one input"
-    lines = render_header(spec) + render_body(spec, task, site)
+    lines = render_header(spec) + render_body(spec, task, site, command_text)
     return "\n".join(lines) + "\n"
 
 
@@ -2674,6 +2713,7 @@ def _submission_lock(output_dir: Path) -> Iterator[None]:
 
 def cmd_submit(task_name: str, argv: Sequence[str]) -> int:
     """Validate, render, and submit one job or one array."""
+    command_text = shlex.join(["cue", task_name, *argv])
     args = build_submit_parser(task_name).parse_args(list(argv))
     if args.manifest:
         args.inputs = list(args.inputs) + read_manifest(
@@ -2721,7 +2761,7 @@ def cmd_submit(task_name: str, argv: Sequence[str]) -> int:
     spec = resolve_spec(args, task, site, inputs, secondaries, stems)
     if args.inject_resources:
         spec = stage_injected_inputs(spec, task, write=not args.dry_run)
-    script = render_script(spec, task, site)
+    script = render_script(spec, task, site, command_text)
 
     if args.dry_run:
         print(script, end="")

@@ -13,6 +13,19 @@ set -euo pipefail
 input_path="input/CeS8_inp.txt"
 stem="CeS8_inp"
 
+printf '%s\n' 'cue 0.2.0'
+printf 'command     %s\n' 'cue fdmnes input/CeS8_inp.txt --dry-run'
+printf 'job name    %s\n' CeS8_inp
+printf 'job id      %s\n' "$SLURM_JOB_ID"
+printf 'task        %s\n' fdmnes
+printf 'input       %s\n' "$input_path"
+printf 'node        %s\n' "$(hostname)"
+printf 'partition   %s\n' "$SLURM_JOB_PARTITION"
+printf 'cpus        %s\n' 1
+printf 'memory      %s\n' '2 GB'
+printf 'user        %s\n' "$USER"
+printf 'started     %s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
+
 mkdir -p "out" "log"
 
 scratch="/scratch/$SLURM_JOB_ID"
@@ -34,6 +47,8 @@ rsync -a --exclude=fdmfile.txt --exclude=output "$PWD/" "$SLURM_SUBMIT_DIR/out/"
 
 cd "$SLURM_SUBMIT_DIR"
 rm -rf "$scratch"
+
+printf 'finished    %s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
 
 sleep 2
 sacct -n -j "$SLURM_JOB_ID" --format=JobID,JobName,MaxRSS,Elapsed,CPUTime --units=MB || true
