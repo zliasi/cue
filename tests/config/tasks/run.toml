@@ -1,5 +1,0 @@
-# fixture run config for tests.
-
-[execution]
-command = '{launcher} "{input}"'
-launcher = "bash"

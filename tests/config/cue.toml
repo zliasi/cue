@@ -1,5 +1,0 @@
-# fixture site config for tests. deterministic values only.
-search_path = ["~/.config/cue"]
-
-[defaults]
-partition = "chem"
