@@ -1,0 +1,283 @@
+#!/usr/bin/env python3
+"""
+cue, run a program on many inputs as one Slurm array job.
+
+Usage:
+  cue TEMPLATE [OPTIONS] INPUT...
+  cue list | show TEMPLATE | init TEMPLATE | completion
+
+Settings merge in this order, later wins: CUE_HOME/cue.conf, the user's
+~/.config/cue/cue.conf, the #CUE header of the template, command-line
+flags. Templates are looked up in ~/.config/cue/templates first and then
+in CUE_HOME/templates. CUE_HOME defaults to the directory above this file.
+
+Exit status 0 on success, 1 on a user error, 2 when Slurm rejects the job.
+Python 3.9 standard library only, so it runs on every login node.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import re
+import shutil
+import sys
+from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
+
+EXIT_OK = 0
+EXIT_USER = 1
+EXIT_SLURM = 2
+
+COMMANDS = ("list", "show", "init", "completion")
+TEMPLATE_SUFFIX = ".sbatch"
+HEADER_PREFIX = "#CUE "
+KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+TIME_PATTERN = re.compile(r"^(\d+-)?\d+(:\d+){0,2}$")
+POSITIVE_INT_KEYS = ("cpus", "memory", "throttle", "ntasks")
+
+
+class UserError(Exception):
+    """A problem the user can fix, reported once and exit 1."""
+
+
+class SlurmError(Exception):
+    """A rejected or failed sbatch call, reported once and exit 2."""
+
+
+@dataclass(frozen=True)
+class SubmitRequest:
+    """Validated submit arguments. Only flags the user gave are in flags."""
+
+    template: str
+    inputs: tuple[str, ...]
+    flags: dict[str, str]
+
+
+def cue_home() -> Path:
+    """Return CUE_HOME, or the checkout holding this script when unset."""
+    env = os.environ.get("CUE_HOME")
+    if env:
+        return Path(env)
+    return Path(__file__).resolve().parent.parent
+
+
+def user_dir() -> Path:
+    """Return the per-user config directory, XDG_CONFIG_HOME aware."""
+    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base) / "cue"
+
+
+def template_dirs() -> list[Path]:
+    """Return template directories in lookup order, user first."""
+    return [user_dir() / "templates", cue_home() / "templates"]
+
+
+def check_template_name(name: str) -> None:
+    """Reject names that could escape the template directories."""
+    if not NAME_PATTERN.match(name):
+        raise UserError(f"invalid template name: {name}")
+
+
+def find_template(name: str) -> Path:
+    """Return the first template file called NAME, user dir shadows shipped."""
+    check_template_name(name)
+    for directory in template_dirs():
+        candidate = directory / (name + TEMPLATE_SUFFIX)
+        if candidate.is_file():
+            return candidate
+    searched = ", ".join(str(d) for d in template_dirs())
+    raise UserError(f"no template {name}{TEMPLATE_SUFFIX} in {searched}")
+
+
+def list_templates() -> list[tuple[str, Path]]:
+    """Return (name, path) for every visible template, sorted by name."""
+    seen: dict[str, Path] = {}
+    for directory in template_dirs():
+        if not directory.is_dir():
+            continue
+        for path in sorted(directory.glob("*" + TEMPLATE_SUFFIX)):
+            seen.setdefault(path.name[: -len(TEMPLATE_SUFFIX)], path)
+    return sorted(seen.items())
+
+
+def parse_assignment(text: str, where: str) -> tuple[str, str]:
+    """Split KEY=VALUE, lowercase key of letters, digits, and underscores."""
+    key, sep, value = text.partition("=")
+    if not sep or not KEY_PATTERN.match(key):
+        raise UserError(f"{where}: expected KEY=VALUE, got {text!r}")
+    return key, value.strip()
+
+
+def read_conf(path: Path) -> dict[str, str]:
+    """Read KEY=VALUE lines from PATH, blank lines and # comments ignored."""
+    values: dict[str, str] = {}
+    if not path.is_file():
+        return values
+    with path.open(encoding="utf-8") as handle:
+        for number, raw in enumerate(handle, start=1):
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            key, value = parse_assignment(line, f"{path}:{number}")
+            values[key] = value
+    return values
+
+
+def read_header(path: Path) -> dict[str, str]:
+    """Read KEY=VALUE tokens from the #CUE lines at the top of a template."""
+    values: dict[str, str] = {}
+    with path.open(encoding="utf-8") as handle:
+        for number, raw in enumerate(handle, start=1):
+            if not raw.startswith(HEADER_PREFIX):
+                continue
+            for token in raw[len(HEADER_PREFIX) :].split():
+                key, value = parse_assignment(token, f"{path}:{number}")
+                values[key] = value
+    return values
+
+
+def validate_settings(settings: dict[str, str]) -> None:
+    """Check the values cue itself relies on, other keys pass through."""
+    for key in POSITIVE_INT_KEYS:
+        value = settings.get(key)
+        if value is not None and not (value.isdigit() and int(value) > 0):
+            raise UserError(f"{key} must be a positive integer, got {value!r}")
+    time = settings.get("time")
+    if time is not None and not TIME_PATTERN.match(time):
+        raise UserError(f"time must look like D-HH:MM:SS or HH:MM:SS, got {time!r}")
+
+
+def resolve_settings(template: Path, flags: dict[str, str]) -> dict[str, str]:
+    """Merge site conf, user conf, template header, and flags, later wins."""
+    settings: dict[str, str] = {}
+    settings.update(read_conf(cue_home() / "cue.conf"))
+    settings.update(read_conf(user_dir() / "cue.conf"))
+    settings.update(read_header(template))
+    settings.update(flags)
+    validate_settings(settings)
+    return settings
+
+
+def cmd_list() -> int:
+    """Print every template with the directory it comes from."""
+    for name, path in list_templates():
+        print(f"{name:16} {path.parent}")
+    return EXIT_OK
+
+
+def cmd_show(name: str) -> int:
+    """Print the template that NAME resolves to."""
+    sys.stdout.write(find_template(name).read_text(encoding="utf-8"))
+    return EXIT_OK
+
+
+def cmd_init(name: str) -> int:
+    """Copy the shipped template NAME into the user template directory."""
+    check_template_name(name)
+    source = cue_home() / "templates" / (name + TEMPLATE_SUFFIX)
+    if not source.is_file():
+        raise UserError(f"no shipped template {name}, see cue list")
+    target = user_dir() / "templates" / source.name
+    if target.exists():
+        raise UserError(f"{target} exists, remove it first")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, target)
+    print(target)
+    return EXIT_OK
+
+
+def cmd_completion() -> int:
+    """Print the bash completion file shipped with cue."""
+    path = cue_home() / "completions" / "cue"
+    if not path.is_file():
+        raise UserError(f"no completion file at {path}")
+    sys.stdout.write(path.read_text(encoding="utf-8"))
+    return EXIT_OK
+
+
+def cmd_submit(request: SubmitRequest) -> int:
+    """Resolve the template and settings for a submission and print them."""
+    template = find_template(request.template)
+    settings = resolve_settings(template, request.flags)
+    print(f"template {template}")
+    for key, value in sorted(settings.items()):
+        print(f"{key}={value}")
+    for path in request.inputs:
+        print(f"input {path}")
+    return EXIT_OK
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the parser. A first word that is not a command is a template."""
+    parser = argparse.ArgumentParser(
+        prog="cue",
+        description="run a program on many inputs as one Slurm array job",
+        usage="cue TEMPLATE [OPTIONS] INPUT...\n"
+        "       cue {list,show,init,completion} ...",
+    )
+    commands = parser.add_subparsers(dest="command", metavar="COMMAND")
+    submit = commands.add_parser("submit", help=argparse.SUPPRESS)
+    submit.add_argument("template")
+    submit.add_argument("inputs", nargs="+", metavar="INPUT")
+    submit.add_argument("-c", "--cpus", help="cores per task")
+    submit.add_argument("-m", "--memory", help="memory per task in GB")
+    submit.add_argument("-t", "--time", help="time limit, D-HH:MM:SS")
+    submit.add_argument("-p", "--partition", help="partition")
+    submit.add_argument("-T", "--throttle", help="tasks running at once")
+    commands.add_parser("list", help="list templates and where they come from")
+    show = commands.add_parser("show", help="print a template")
+    show.add_argument("template")
+    init = commands.add_parser("init", help="copy a template to your own dir")
+    init.add_argument("template")
+    commands.add_parser("completion", help="print the bash completion file")
+    return parser
+
+
+def submit_request(args: argparse.Namespace) -> SubmitRequest:
+    """Turn parsed submit arguments into a request, dropping unset flags."""
+    flags: dict[str, str] = {}
+    for key in ("cpus", "memory", "time", "partition", "throttle"):
+        value = getattr(args, key)
+        if value is not None:
+            flags[key] = str(value)
+    return SubmitRequest(str(args.template), tuple(args.inputs), flags)
+
+
+def dispatch(argv: Sequence[str]) -> int:
+    """Parse ARGV and run the selected command."""
+    words = list(argv)
+    if words and words[0] not in COMMANDS and not words[0].startswith("-"):
+        words.insert(0, "submit")
+    args = build_parser().parse_args(words)
+    command: str | None = args.command
+    if command == "submit":
+        return cmd_submit(submit_request(args))
+    if command == "list":
+        return cmd_list()
+    if command == "show":
+        return cmd_show(str(args.template))
+    if command == "init":
+        return cmd_init(str(args.template))
+    if command == "completion":
+        return cmd_completion()
+    build_parser().print_usage(sys.stderr)
+    return EXIT_USER
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Run cue, report one error line on failure, and return the status."""
+    try:
+        return dispatch(sys.argv[1:] if argv is None else argv)
+    except UserError as error:
+        print(f"cue: {error}", file=sys.stderr)
+        return EXIT_USER
+    except SlurmError as error:
+        print(f"cue: {error}", file=sys.stderr)
+        return EXIT_SLURM
+
+
+if __name__ == "__main__":
+    sys.exit(main())
