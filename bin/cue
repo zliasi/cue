@@ -22,6 +22,7 @@ import os
 import re
 import shutil
 import sys
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,6 +34,8 @@ EXIT_SLURM = 2
 COMMANDS = ("list", "show", "init", "completion")
 TEMPLATE_SUFFIX = ".sbatch"
 HEADER_PREFIX = "#CUE "
+PLACEHOLDER_PATTERN = re.compile(r"\{\{([a-z][a-z0-9_]*)\}\}")
+STAMP_FORMAT = "%Y%m%d-%H%M%S"
 KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 TIME_PATTERN = re.compile(r"^(\d+-)?\d+(:\d+){0,2}$")
@@ -49,10 +52,16 @@ class SlurmError(Exception):
 
 @dataclass(frozen=True)
 class SubmitRequest:
-    """Validated submit arguments. Only flags the user gave are in flags."""
+    """
+    Validated submit arguments. Only flags the user gave are in flags.
+
+    Inputs come from the command line or from the manifest file, never both.
+    """
 
     template: str
     inputs: tuple[str, ...]
+    manifest: str | None
+    skip_done: bool
     flags: dict[str, str]
 
 
@@ -161,6 +170,76 @@ def resolve_settings(template: Path, flags: dict[str, str]) -> dict[str, str]:
     return settings
 
 
+def render(text: str, values: dict[str, str]) -> str:
+    """Replace every {{key}} in TEXT, fail on keys missing from VALUES."""
+    missing = sorted(
+        {m.group(1) for m in PLACEHOLDER_PATTERN.finditer(text)} - set(values)
+    )
+    if missing:
+        raise UserError(
+            "no value for " + ", ".join(missing) + ", set it in cue.conf or with --set"
+        )
+    return PLACEHOLDER_PATTERN.sub(lambda m: values[m.group(1)], text)
+
+
+def strip_header(text: str) -> str:
+    """Drop the #CUE lines, they hold defaults and are not part of the job."""
+    kept = [
+        line for line in text.splitlines(True) if not line.startswith(HEADER_PREFIX)
+    ]
+    return "".join(kept)
+
+
+def read_manifest(path: Path) -> list[str]:
+    """Read one input per line, blank lines and # comments ignored."""
+    if not path.is_file():
+        raise UserError(f"no manifest file {path}")
+    lines = [line.strip() for line in path.read_text(encoding="utf-8").splitlines()]
+    inputs = [line for line in lines if line and not line.startswith("#")]
+    if not inputs:
+        raise UserError(f"manifest {path} has no inputs")
+    return inputs
+
+
+def validate_inputs(inputs: Sequence[str], ext: str | None) -> None:
+    """Every input must be an existing file with the template extension."""
+    for item in inputs:
+        if ext and not item.endswith(ext):
+            raise UserError(f"{item} does not end with {ext}")
+        if not Path(item).is_file():
+            raise UserError(f"input not found: {item}")
+
+
+def stem_of(item: str) -> str:
+    """Return the basename without its last extension, as cue.sh does."""
+    name = Path(item).name
+    return name.rsplit(".", 1)[0] if "." in name else name
+
+
+def done_path(pattern: str, item: str, outdir: str) -> Path:
+    """Render the done pattern for ITEM, relative paths live under OUTDIR."""
+    values = {"stem": stem_of(item), "input": item, "outdir": outdir}
+    path = Path(render(pattern, values))
+    return path if path.is_absolute() else Path(outdir) / path
+
+
+def drop_done(inputs: Sequence[str], settings: dict[str, str]) -> list[str]:
+    """Return the inputs whose done file is missing, needs done and outdir."""
+    pattern = settings.get("done")
+    if not pattern:
+        raise UserError("--skip-done needs a done pattern in the template header")
+    outdir = require(settings, "outdir", "-o")
+    return [i for i in inputs if not done_path(pattern, i, outdir).exists()]
+
+
+def require(settings: dict[str, str], key: str, flag: str) -> str:
+    """Return SETTINGS[KEY] or fail naming the flag that sets it."""
+    value = settings.get(key)
+    if not value:
+        raise UserError(f"{key} is not set, add it to cue.conf or use {flag}")
+    return value
+
+
 def cmd_list() -> int:
     """Print every template with the directory it comes from."""
     for name, path in list_templates():
@@ -198,15 +277,48 @@ def cmd_completion() -> int:
     return EXIT_OK
 
 
+def collect_inputs(request: SubmitRequest, settings: dict[str, str]) -> list[str]:
+    """Gather, validate, and filter the inputs of a submission."""
+    if request.manifest is not None:
+        inputs = read_manifest(Path(request.manifest))
+    else:
+        inputs = list(request.inputs)
+    validate_inputs(inputs, settings.get("ext"))
+    if request.skip_done:
+        kept = drop_done(inputs, settings)
+        print(f"cue: skipping {len(inputs) - len(kept)} done inputs", file=sys.stderr)
+        if not kept:
+            raise UserError("every input is done, nothing to submit")
+        inputs = kept
+    return inputs
+
+
+def render_submission(
+    template: Path, settings: dict[str, str], inputs: Sequence[str], stamp: str
+) -> tuple[str, Path]:
+    """Render the job script, return it with the manifest path it refers to."""
+    name = settings.get("name") or template.name[: -len(TEMPLATE_SUFFIX)]
+    logdir = require(settings, "logdir", "-l")
+    manifest = Path(logdir) / f"{name}-{stamp}.manifest"
+    values = dict(settings)
+    values.update(
+        name=name,
+        last=str(len(inputs) - 1),
+        manifest=str(manifest),
+        cue_lib=str(cue_home() / "lib" / "cue.sh"),
+    )
+    text = strip_header(template.read_text(encoding="utf-8"))
+    return render(text, values), manifest
+
+
 def cmd_submit(request: SubmitRequest) -> int:
-    """Resolve the template and settings for a submission and print them."""
+    """Render the job script for a submission and print it."""
     template = find_template(request.template)
     settings = resolve_settings(template, request.flags)
-    print(f"template {template}")
-    for key, value in sorted(settings.items()):
-        print(f"{key}={value}")
-    for path in request.inputs:
-        print(f"input {path}")
+    inputs = collect_inputs(request, settings)
+    stamp = time.strftime(STAMP_FORMAT)
+    script, _ = render_submission(template, settings, inputs, stamp)
+    sys.stdout.write(script)
     return EXIT_OK
 
 
@@ -221,7 +333,11 @@ def build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", metavar="COMMAND")
     submit = commands.add_parser("submit", help=argparse.SUPPRESS)
     submit.add_argument("template")
-    submit.add_argument("inputs", nargs="+", metavar="INPUT")
+    submit.add_argument("inputs", nargs="*", metavar="INPUT")
+    submit.add_argument("-M", "--manifest", help="file with one input per line")
+    submit.add_argument(
+        "--skip-done", action="store_true", help="drop inputs whose done file exists"
+    )
     submit.add_argument("-c", "--cpus", help="cores per task")
     submit.add_argument("-m", "--memory", help="memory per task in GB")
     submit.add_argument("-t", "--time", help="time limit, D-HH:MM:SS")
@@ -243,7 +359,13 @@ def submit_request(args: argparse.Namespace) -> SubmitRequest:
         value = getattr(args, key)
         if value is not None:
             flags[key] = str(value)
-    return SubmitRequest(str(args.template), tuple(args.inputs), flags)
+    inputs = tuple(str(i) for i in args.inputs)
+    manifest = None if args.manifest is None else str(args.manifest)
+    if bool(inputs) == (manifest is not None):
+        raise UserError("give input files or -M MANIFEST, one of the two")
+    return SubmitRequest(
+        str(args.template), inputs, manifest, bool(args.skip_done), flags
+    )
 
 
 def dispatch(argv: Sequence[str]) -> int:
