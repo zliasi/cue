@@ -18,14 +18,18 @@ Python 3.9 standard library only, so it runs on every login node.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import os
 import re
 import shutil
+import subprocess
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NoReturn
 
 EXIT_OK = 0
 EXIT_USER = 1
@@ -36,6 +40,11 @@ TEMPLATE_SUFFIX = ".sbatch"
 HEADER_PREFIX = "#CUE "
 PLACEHOLDER_PATTERN = re.compile(r"\{\{([a-z][a-z0-9_]*)\}\}")
 STAMP_FORMAT = "%Y%m%d-%H%M%S"
+LOCK_NAME = ".lock"
+LOCK_ATTEMPTS = 30
+LOCK_WAIT_SECONDS = 1.0
+SBATCH_TIMEOUT_SECONDS = 120
+JOB_ID_PATTERN = re.compile(r"^\d+(:\d+)*$")
 KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 TIME_PATTERN = re.compile(r"^(\d+-)?\d+(:\d+){0,2}$")
@@ -50,6 +59,13 @@ class SlurmError(Exception):
     """A rejected or failed sbatch call, reported once and exit 2."""
 
 
+class Parser(argparse.ArgumentParser):
+    """ArgumentParser whose usage errors exit 1 like every other user error."""
+
+    def error(self, message: str) -> NoReturn:
+        raise UserError(message)
+
+
 @dataclass(frozen=True)
 class SubmitRequest:
     """
@@ -62,7 +78,23 @@ class SubmitRequest:
     inputs: tuple[str, ...]
     manifest: str | None
     skip_done: bool
+    dry_run: bool
+    after: str | None
     flags: dict[str, str]
+
+
+@dataclass(frozen=True)
+class Submission:
+    """A rendered job ready for sbatch, paths relative to the working dir."""
+
+    template: str
+    name: str
+    stamp: str
+    inputs: tuple[str, ...]
+    script: str
+    manifest: Path
+    outdir: Path
+    logdir: Path
 
 
 def cue_home() -> Path:
@@ -293,13 +325,15 @@ def collect_inputs(request: SubmitRequest, settings: dict[str, str]) -> list[str
     return inputs
 
 
-def render_submission(
-    template: Path, settings: dict[str, str], inputs: Sequence[str], stamp: str
-) -> tuple[str, Path]:
-    """Render the job script, return it with the manifest path it refers to."""
+def prepare_submission(
+    request: SubmitRequest, template: Path, settings: dict[str, str], stamp: str
+) -> Submission:
+    """Collect inputs and render the job script for REQUEST."""
+    inputs = collect_inputs(request, settings)
     name = settings.get("name") or template.name[: -len(TEMPLATE_SUFFIX)]
-    logdir = require(settings, "logdir", "-l")
-    manifest = Path(logdir) / f"{name}-{stamp}.manifest"
+    outdir = Path(require(settings, "outdir", "-o"))
+    logdir = Path(require(settings, "logdir", "-l"))
+    manifest = logdir / f"{name}-{stamp}.manifest"
     values = dict(settings)
     values.update(
         name=name,
@@ -308,47 +342,175 @@ def render_submission(
         cue_lib=str(cue_home() / "lib" / "cue.sh"),
     )
     text = strip_header(template.read_text(encoding="utf-8"))
-    return render(text, values), manifest
+    script = render(text, values)
+    return Submission(
+        request.template, name, stamp, tuple(inputs), script, manifest, outdir, logdir
+    )
+
+
+def run_sbatch(args: Sequence[str], script: str | None = None) -> str:
+    """Run sbatch with ARGS, SCRIPT on stdin when given, return its stdout."""
+    # A script file on the command line leaves stdin unused, so close it.
+    stdin = None if script is not None else subprocess.DEVNULL
+    try:
+        done = subprocess.run(
+            ["sbatch", *args],
+            input=script,
+            stdin=stdin,
+            capture_output=True,
+            text=True,
+            timeout=SBATCH_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except FileNotFoundError as error:
+        raise SlurmError("sbatch not found, is this a login node?") from error
+    except subprocess.TimeoutExpired as error:
+        raise SlurmError(
+            f"sbatch gave no answer in {SBATCH_TIMEOUT_SECONDS}s"
+        ) from error
+    if done.returncode != 0:
+        raise SlurmError(done.stderr.strip() or f"sbatch exited {done.returncode}")
+    sys.stderr.write(done.stderr)
+    return done.stdout.strip()
+
+
+@contextmanager
+def locked(logdir: Path) -> Iterator[None]:
+    """Hold logdir/.lock so two cue runs never back up or submit at once."""
+    with (logdir / LOCK_NAME).open("w") as handle:
+        for attempt in range(LOCK_ATTEMPTS):
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if attempt == LOCK_ATTEMPTS - 1:
+                    raise UserError(
+                        f"{logdir / LOCK_NAME} is held by another cue"
+                    ) from None
+                time.sleep(LOCK_WAIT_SECONDS)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def backup_outputs(sub: Submission) -> list[tuple[Path, Path]]:
+    """Move out/<stem>.* of every input to out/backup/<stamp>/, return moves."""
+    target = sub.outdir / "backup" / sub.stamp
+    moves: list[tuple[Path, Path]] = []
+    for item in sub.inputs:
+        for path in sorted(sub.outdir.glob(stem_of(item) + ".*")):
+            if path.is_file():
+                moves.append((path, target / path.name))
+    if moves:
+        target.mkdir(parents=True, exist_ok=True)
+        for source, destination in moves:
+            source.replace(destination)
+        print(f"cue: moved {len(moves)} old output files to {target}", file=sys.stderr)
+    return moves
+
+
+def restore_outputs(moves: Sequence[tuple[Path, Path]]) -> None:
+    """Undo backup_outputs after a failed submission."""
+    for source, destination in moves:
+        destination.replace(source)
+
+
+def write_record(sub: Submission, request: SubmitRequest, job_id: str) -> Path:
+    """Write log/<name>-<jobid>.cue with what cue -f needs to resubmit."""
+    path = sub.logdir / f"{sub.name}-{job_id}.cue"
+    lines = [
+        f"# resubmit with: cue -f {path}",
+        f"template={sub.template}",
+        f"manifest={sub.manifest}",
+        f"job={job_id}",
+        f"stamp={sub.stamp}",
+    ]
+    if request.skip_done:
+        lines.append("skip_done=1")
+    lines.extend(f"{key}={value}" for key, value in sorted(request.flags.items()))
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+def submit(sub: Submission, request: SubmitRequest) -> str:
+    """Back up, write manifest and script, call sbatch, return the job id."""
+    args = ["--parsable", f"--comment=cue:{sub.name}"]
+    if request.after is not None:
+        args.append(f"--dependency=afterok:{request.after}")
+    sub.outdir.mkdir(parents=True, exist_ok=True)
+    sub.logdir.mkdir(parents=True, exist_ok=True)
+    with locked(sub.logdir):
+        moves = backup_outputs(sub)
+        sub.manifest.write_text("\n".join(sub.inputs) + "\n", encoding="utf-8")
+        script = sub.manifest.with_suffix(".sbatch")
+        script.write_text(sub.script, encoding="utf-8")
+        try:
+            job_id = run_sbatch([*args, str(script)]).partition(";")[0]
+        except SlurmError:
+            restore_outputs(moves)
+            raise
+        write_record(sub, request, job_id)
+    return job_id
 
 
 def cmd_submit(request: SubmitRequest) -> int:
-    """Render the job script for a submission and print it."""
+    """Render and submit, or with --dry-run print the script and test it."""
     template = find_template(request.template)
     settings = resolve_settings(template, request.flags)
-    inputs = collect_inputs(request, settings)
-    stamp = time.strftime(STAMP_FORMAT)
-    script, _ = render_submission(template, settings, inputs, stamp)
-    sys.stdout.write(script)
+    sub = prepare_submission(request, template, settings, time.strftime(STAMP_FORMAT))
+    if request.dry_run:
+        sys.stdout.write(sub.script)
+        run_sbatch(["--test-only"], sub.script)
+        return EXIT_OK
+    print(submit(sub, request))
     return EXIT_OK
 
 
-def build_parser() -> argparse.ArgumentParser:
-    """Build the parser. A first word that is not a command is a template."""
-    parser = argparse.ArgumentParser(
+USAGE = """\
+cue TEMPLATE [OPTIONS] INPUT...
+       cue TEMPLATE [OPTIONS] -M MANIFEST
+       cue list | show TEMPLATE | init TEMPLATE | completion"""
+
+
+def submit_parser() -> argparse.ArgumentParser:
+    """Build the parser for a submission."""
+    parser = Parser(
         prog="cue",
+        usage=USAGE,
         description="run a program on many inputs as one Slurm array job",
-        usage="cue TEMPLATE [OPTIONS] INPUT...\n"
-        "       cue {list,show,init,completion} ...",
     )
-    commands = parser.add_subparsers(dest="command", metavar="COMMAND")
-    submit = commands.add_parser("submit", help=argparse.SUPPRESS)
-    submit.add_argument("template")
-    submit.add_argument("inputs", nargs="*", metavar="INPUT")
-    submit.add_argument("-M", "--manifest", help="file with one input per line")
-    submit.add_argument(
+    parser.add_argument("template")
+    parser.add_argument("inputs", nargs="*", metavar="INPUT")
+    parser.add_argument("-M", "--manifest", help="file with one input per line")
+    parser.add_argument("-c", "--cpus", help="cores per task")
+    parser.add_argument("-m", "--memory", help="memory per task in GB")
+    parser.add_argument("-t", "--time", help="time limit, D-HH:MM:SS")
+    parser.add_argument("-p", "--partition", help="partition")
+    parser.add_argument("-T", "--throttle", help="tasks running at once")
+    parser.add_argument(
         "--skip-done", action="store_true", help="drop inputs whose done file exists"
     )
-    submit.add_argument("-c", "--cpus", help="cores per task")
-    submit.add_argument("-m", "--memory", help="memory per task in GB")
-    submit.add_argument("-t", "--time", help="time limit, D-HH:MM:SS")
-    submit.add_argument("-p", "--partition", help="partition")
-    submit.add_argument("-T", "--throttle", help="tasks running at once")
-    commands.add_parser("list", help="list templates and where they come from")
-    show = commands.add_parser("show", help="print a template")
-    show.add_argument("template")
-    init = commands.add_parser("init", help="copy a template to your own dir")
-    init.add_argument("template")
-    commands.add_parser("completion", help="print the bash completion file")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print the script, run sbatch --test-only",
+    )
+    parser.add_argument("--after", metavar="JOBID", help="start after JOBID succeeds")
+    return parser
+
+
+def command_parser(command: str) -> argparse.ArgumentParser:
+    """Build the parser for list, show, init, or completion."""
+    helps = {
+        "list": "list templates and where they come from",
+        "show": "print a template",
+        "init": "copy a template to your own directory",
+        "completion": "print the bash completion file",
+    }
+    parser = Parser(prog=f"cue {command}", description=helps[command])
+    if command in ("show", "init"):
+        parser.add_argument("template")
     return parser
 
 
@@ -363,30 +525,39 @@ def submit_request(args: argparse.Namespace) -> SubmitRequest:
     manifest = None if args.manifest is None else str(args.manifest)
     if bool(inputs) == (manifest is not None):
         raise UserError("give input files or -M MANIFEST, one of the two")
+    after = None if args.after is None else str(args.after)
+    if after is not None and not JOB_ID_PATTERN.match(after):
+        raise UserError(f"--after expects a job id, got {after!r}")
     return SubmitRequest(
-        str(args.template), inputs, manifest, bool(args.skip_done), flags
+        str(args.template),
+        inputs,
+        manifest,
+        bool(args.skip_done),
+        bool(args.dry_run),
+        after,
+        flags,
     )
 
 
 def dispatch(argv: Sequence[str]) -> int:
     """Parse ARGV and run the selected command."""
     words = list(argv)
-    if words and words[0] not in COMMANDS and not words[0].startswith("-"):
-        words.insert(0, "submit")
-    args = build_parser().parse_args(words)
-    command: str | None = args.command
+    if not words:
+        print(f"usage: {USAGE}", file=sys.stderr)
+        return EXIT_USER
+    command = words[0] if words[0] in COMMANDS else "submit"
     if command == "submit":
+        # Intermixed parsing lets options follow the input list on 3.9.
+        args = submit_parser().parse_intermixed_args(words)
         return cmd_submit(submit_request(args))
+    args = command_parser(command).parse_args(words[1:])
     if command == "list":
         return cmd_list()
     if command == "show":
         return cmd_show(str(args.template))
     if command == "init":
         return cmd_init(str(args.template))
-    if command == "completion":
-        return cmd_completion()
-    build_parser().print_usage(sys.stderr)
-    return EXIT_USER
+    return cmd_completion()
 
 
 def main(argv: Sequence[str] | None = None) -> int:
