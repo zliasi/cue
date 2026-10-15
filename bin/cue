@@ -42,6 +42,7 @@ PLACEHOLDER_PATTERN = re.compile(r"\{\{([a-z][a-z0-9_]*)\}\}")
 STAMP_FORMAT = "%Y%m%d-%H%M%S"
 LOCK_NAME = ".lock"
 LOCK_ATTEMPTS = 30
+STAMP_ATTEMPTS = 5
 LOCK_WAIT_SECONDS = 1.0
 SBATCH_TIMEOUT_SECONDS = 120
 JOB_ID_PATTERN = re.compile(r"^\d+(:\d+)*$")
@@ -49,6 +50,19 @@ KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 TIME_PATTERN = re.compile(r"^(\d+-)?\d+(:\d+){0,2}$")
 POSITIVE_INT_KEYS = ("cpus", "memory", "throttle", "ntasks")
+ENGINE_KEYS = ("last", "manifest", "cue_lib")
+RECORD_KEYS = ("template", "manifest", "job", "stamp", "skip_done")
+FLAG_KEYS = (
+    "cpus",
+    "memory",
+    "time",
+    "partition",
+    "throttle",
+    "name",
+    "outdir",
+    "logdir",
+    "ntasks",
+)
 
 
 class UserError(Exception):
@@ -189,6 +203,12 @@ def validate_settings(settings: dict[str, str]) -> None:
     time = settings.get("time")
     if time is not None and not TIME_PATTERN.match(time):
         raise UserError(f"time must look like D-HH:MM:SS or HH:MM:SS, got {time!r}")
+    gpu = settings.get("gpu")
+    if gpu is not None and not gpu.isdigit():
+        raise UserError(f"gpu must be a whole number, got {gpu!r}")
+    name = settings.get("name")
+    if name is not None and not NAME_PATTERN.match(name):
+        raise UserError(f"name must be letters, digits, . _ or -, got {name!r}")
 
 
 def resolve_settings(template: Path, flags: dict[str, str]) -> dict[str, str]:
@@ -325,14 +345,36 @@ def collect_inputs(request: SubmitRequest, settings: dict[str, str]) -> list[str
     return inputs
 
 
+def job_name(settings: dict[str, str], template: Path) -> str:
+    """Return the -j name, or the template name when none was given."""
+    return settings.get("name") or template.name[: -len(TEMPLATE_SUFFIX)]
+
+
+def fresh_stamp(logdir: Path, name: str) -> str:
+    """
+    Return a timestamp whose manifest path is unused in LOGDIR.
+
+    The stamp has one second resolution, so a shell loop submitting the
+    same name waits a second rather than overwriting the previous manifest.
+    """
+    for attempt in range(STAMP_ATTEMPTS):
+        stamp = time.strftime(STAMP_FORMAT)
+        if not (logdir / f"{name}-{stamp}.manifest").exists():
+            return stamp
+        if attempt < STAMP_ATTEMPTS - 1:
+            time.sleep(1)
+    raise UserError(f"{logdir}/{name}-{stamp}.manifest keeps existing, try -j")
+
+
 def prepare_submission(
-    request: SubmitRequest, template: Path, settings: dict[str, str], stamp: str
+    request: SubmitRequest, template: Path, settings: dict[str, str]
 ) -> Submission:
-    """Collect inputs and render the job script for REQUEST."""
+    """Collect inputs, pick a stamp, and render the job script for REQUEST."""
     inputs = collect_inputs(request, settings)
-    name = settings.get("name") or template.name[: -len(TEMPLATE_SUFFIX)]
+    name = job_name(settings, template)
     outdir = Path(require(settings, "outdir", "-o"))
     logdir = Path(require(settings, "logdir", "-l"))
+    stamp = fresh_stamp(logdir, name)
     manifest = logdir / f"{name}-{stamp}.manifest"
     values = dict(settings)
     values.update(
@@ -458,7 +500,7 @@ def cmd_submit(request: SubmitRequest) -> int:
     """Render and submit, or with --dry-run print the script and test it."""
     template = find_template(request.template)
     settings = resolve_settings(template, request.flags)
-    sub = prepare_submission(request, template, settings, time.strftime(STAMP_FORMAT))
+    sub = prepare_submission(request, template, settings)
     if request.dry_run:
         sys.stdout.write(sub.script)
         run_sbatch(["--test-only"], sub.script)
@@ -470,6 +512,7 @@ def cmd_submit(request: SubmitRequest) -> int:
 USAGE = """\
 cue TEMPLATE [OPTIONS] INPUT...
        cue TEMPLATE [OPTIONS] -M MANIFEST
+       cue -f RECORD [OPTIONS]
        cue list | show TEMPLATE | init TEMPLATE | completion"""
 
 
@@ -480,14 +523,29 @@ def submit_parser() -> argparse.ArgumentParser:
         usage=USAGE,
         description="run a program on many inputs as one Slurm array job",
     )
-    parser.add_argument("template")
+    parser.add_argument("template", nargs="?")
     parser.add_argument("inputs", nargs="*", metavar="INPUT")
     parser.add_argument("-M", "--manifest", help="file with one input per line")
+    parser.add_argument("-f", "--record", help="resubmit a log/*.cue record")
     parser.add_argument("-c", "--cpus", help="cores per task")
     parser.add_argument("-m", "--memory", help="memory per task in GB")
     parser.add_argument("-t", "--time", help="time limit, D-HH:MM:SS")
     parser.add_argument("-p", "--partition", help="partition")
     parser.add_argument("-T", "--throttle", help="tasks running at once")
+    parser.add_argument("-j", "--name", help="job name, default is the template")
+    parser.add_argument("-o", "--outdir", help="output directory")
+    parser.add_argument("-l", "--logdir", help="log and record directory")
+    parser.add_argument("-n", "--ntasks", help="MPI ranks per task")
+    parser.add_argument(
+        "--gpu", action="store_const", const="1", help="set gpu=1 for the template"
+    )
+    parser.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="set any placeholder, repeatable",
+    )
     parser.add_argument(
         "--skip-done", action="store_true", help="drop inputs whose done file exists"
     )
@@ -514,28 +572,58 @@ def command_parser(command: str) -> argparse.ArgumentParser:
     return parser
 
 
-def submit_request(args: argparse.Namespace) -> SubmitRequest:
-    """Turn parsed submit arguments into a request, dropping unset flags."""
+def flags_from_args(args: argparse.Namespace) -> dict[str, str]:
+    """Collect the settings the user gave on the command line."""
     flags: dict[str, str] = {}
-    for key in ("cpus", "memory", "time", "partition", "throttle"):
+    for key in FLAG_KEYS:
         value = getattr(args, key)
         if value is not None:
             flags[key] = str(value)
+    if args.gpu is not None:
+        flags["gpu"] = str(args.gpu)
+    for text in args.set:
+        key, value = parse_assignment(str(text), "--set")
+        if key in ENGINE_KEYS:
+            raise UserError(f"--set {key} is computed by cue and cannot be set")
+        flags[key] = value
+    return flags
+
+
+def read_record(path: Path) -> dict[str, str]:
+    """Read a log/*.cue record, every key except RECORD_KEYS is a flag."""
+    if not path.is_file():
+        raise UserError(f"no record file {path}")
+    record = read_conf(path)
+    for key in ("template", "manifest"):
+        if not record.get(key):
+            raise UserError(f"{path} has no {key} line, not a cue record")
+    return record
+
+
+def submit_request(args: argparse.Namespace) -> SubmitRequest:
+    """Turn parsed submit arguments into a request, record values first."""
+    flags = flags_from_args(args)
     inputs = tuple(str(i) for i in args.inputs)
     manifest = None if args.manifest is None else str(args.manifest)
+    skip_done = bool(args.skip_done)
+    template = None if args.template is None else str(args.template)
+    if args.record is not None:
+        if template is not None or inputs or manifest is not None:
+            raise UserError("-f takes the template and inputs from the record")
+        record = read_record(Path(str(args.record)))
+        template = record["template"]
+        manifest = record["manifest"]
+        skip_done = skip_done or record.get("skip_done") == "1"
+        flags = {**{k: v for k, v in record.items() if k not in RECORD_KEYS}, **flags}
+    if template is None:
+        raise UserError("give a template name or -f RECORD")
     if bool(inputs) == (manifest is not None):
         raise UserError("give input files or -M MANIFEST, one of the two")
     after = None if args.after is None else str(args.after)
     if after is not None and not JOB_ID_PATTERN.match(after):
         raise UserError(f"--after expects a job id, got {after!r}")
     return SubmitRequest(
-        str(args.template),
-        inputs,
-        manifest,
-        bool(args.skip_done),
-        bool(args.dry_run),
-        after,
-        flags,
+        template, inputs, manifest, skip_done, bool(args.dry_run), after, flags
     )
 
 
