@@ -1,0 +1,4 @@
+# worker scripts, one per line
+w1.sh
+
+w2.sh
