@@ -2,9 +2,10 @@
 Engine tests for bin/cue.
 
 Unit tests call the engine functions directly. Golden tests run the command
-line in a temporary copy of tests/fixtures with a fake sbatch on PATH and
-compare the rendered script with tests/expected. CUE_UPDATE_GOLDENS=1
-rewrites the expected files instead, which is what make goldens does.
+line in a temporary copy of tests/fixtures, plus the shipped templates, with
+a fake sbatch on PATH, and compare the rendered script with tests/expected.
+CUE_UPDATE_GOLDENS=1 rewrites the expected files instead, which is what make
+goldens does.
 """
 
 from __future__ import annotations
@@ -72,7 +73,7 @@ class SettingsTest(unittest.TestCase):
         patch = mock.patch.dict(os.environ, env)
         patch.start()
         self.addCleanup(patch.stop)
-        self.orca = FIXTURES / "home" / "templates" / "orca.sbatch"
+        self.orca = ROOT / "templates" / "orca.sbatch"
 
     def test_header_reads_every_cue_line(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -202,6 +203,9 @@ class CommandTest(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.dir = Path(tmp.name)
         shutil.copytree(FIXTURES, self.dir, dirs_exist_ok=True)
+        # Shipped templates render next to the fixture ones.
+        for template in (ROOT / "templates").glob("*.sbatch"):
+            shutil.copy(template, self.dir / "home" / "templates")
         bin_dir = self.dir / "bin"
         bin_dir.mkdir()
         sbatch = bin_dir / "sbatch"
@@ -264,7 +268,7 @@ class CommandTest(unittest.TestCase):
         self.assertTrue(Path("out").is_dir())
 
     def test_flags_override_every_setting(self) -> None:
-        argv = ["orca", "-c", "16", "-m", "32", "-t", "2-00:00:00", "-p", "gpu"]
+        argv = ["orca", "-c", "2", "-m", "4", "-t", "00:20:00", "-p", "katla_short"]
         argv += ["-T", "1", "-j", "batch1", "-o", "results", "-l", "logs", "c.inp"]
         status, out, err = self.run_cue(argv)
         self.assertEqual((status, err), (0, ""))
@@ -272,7 +276,7 @@ class CommandTest(unittest.TestCase):
         self.assert_golden("orca-flags", script.read_text())
         self.assertIn("--comment=cue:batch1", self.sbatch_args())
         record = Path(f"logs/batch1-{JOB_ID}.cue").read_text()
-        self.assertIn("cpus=16\nlogdir=logs\nmemory=32\nname=batch1\n", record)
+        self.assertIn("cpus=2\nlogdir=logs\nmemory=4\nname=batch1\n", record)
 
     def test_manifest_set_and_gpu_render(self) -> None:
         argv = ["run", "-M", "list.txt", "-n", "4", "--gpu", "--set", "cpus=2"]
@@ -286,7 +290,7 @@ class CommandTest(unittest.TestCase):
         self.assertIn("--dependency=afterok:100", self.sbatch_args())
 
     def test_record_resubmits_the_same_script(self) -> None:
-        argv = ["orca", "-c", "16", "-m", "32", "-t", "2-00:00:00", "-p", "gpu"]
+        argv = ["orca", "-c", "2", "-m", "4", "-t", "00:20:00", "-p", "katla_short"]
         argv += ["-T", "1", "-j", "batch1", "-o", "results", "-l", "logs", "c.inp"]
         self.assertEqual(self.run_cue(argv)[0], 0)
         with mock.patch.object(cue.time, "strftime", return_value=LATER_STAMP):

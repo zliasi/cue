@@ -15,5 +15,5 @@ check:
 	$(if $(PY),black --check $(PY))
 	$(if $(PY),ruff check $(PY))
 	$(if $(PY),mypy --strict $(PY))
-	$(if $(SH),shellcheck $(SH))
+	$(if $(SH),shellcheck -x $(SH))
 	$(if $(SH),shfmt -i 2 -ci -d $(SH))
