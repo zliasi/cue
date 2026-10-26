@@ -289,6 +289,20 @@ class CommandTest(unittest.TestCase):
         )
         self.assertIn("--dependency=afterok:100", self.sbatch_args())
 
+    def test_python_worker_takes_manifest_lines(self) -> None:
+        argv = ["python", "-M", "list.txt", "--set", "script=worker.py", "-c", "2"]
+        argv += ["-m", "2", "-t", "00:10:00", "-p", "katla_short", "-T", "2"]
+        status, out, err = self.run_cue(argv)
+        self.assertEqual((status, err), (0, ""))
+        script = Path("log") / f"python-{STAMP}.sbatch"
+        self.assert_golden("python-manifest", script.read_text())
+        self.assertIn("script=worker.py", Path(f"log/python-{JOB_ID}.cue").read_text())
+
+    def test_python_needs_a_worker(self) -> None:
+        status, out, err = self.run_cue(["python", "w1.sh"])
+        self.assertEqual(status, 1)
+        self.assertIn("no value for script", err)
+
     def test_record_resubmits_the_same_script(self) -> None:
         argv = ["orca", "-c", "2", "-m", "4", "-t", "00:20:00", "-p", "katla_short"]
         argv += ["-T", "1", "-j", "batch1", "-o", "results", "-l", "logs", "c.inp"]
@@ -376,9 +390,9 @@ class CommandTest(unittest.TestCase):
     def test_list_show_and_init(self) -> None:
         status, out, err = self.run_cue(["list"])
         self.assertEqual(status, 0)
-        self.assertEqual(
-            [line.split()[0] for line in out.splitlines()], ["orca", "run"]
-        )
+        names = sorted(t.stem for t in Path("home/templates").glob("*.sbatch"))
+        self.assertEqual([line.split()[0] for line in out.splitlines()], names)
+        self.assertIn("run", names)
         status, out, err = self.run_cue(["show", "orca"])
         self.assertEqual(out, Path("home/templates/orca.sbatch").read_text())
         status, out, err = self.run_cue(["init", "orca"])
