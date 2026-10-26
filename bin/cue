@@ -4,7 +4,7 @@ cue, run a program on many inputs as one Slurm array job.
 
 Usage:
   cue TEMPLATE [OPTIONS] INPUT...
-  cue list | show TEMPLATE | init TEMPLATE | completion
+  cue list | show TEMPLATE | init TEMPLATE | completion [--install]
 
 Settings merge in this order, later wins: CUE_HOME/cue.conf, the user's
 ~/.config/cue/cue.conf, the #CUE header of the template, command-line
@@ -320,12 +320,19 @@ def cmd_init(name: str) -> int:
     return EXIT_OK
 
 
-def cmd_completion() -> int:
-    """Print the bash completion file shipped with cue."""
+def cmd_completion(install: bool) -> int:
+    """Print the shipped bash completion file, or install it for this user."""
     path = cue_home() / "completions" / "cue"
     if not path.is_file():
         raise UserError(f"no completion file at {path}")
-    sys.stdout.write(path.read_text(encoding="utf-8"))
+    if not install:
+        sys.stdout.write(path.read_text(encoding="utf-8"))
+        return EXIT_OK
+    base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    target = Path(base) / "bash-completion" / "completions" / "cue"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(path, target)
+    print(target)
     return EXIT_OK
 
 
@@ -513,7 +520,7 @@ USAGE = """\
 cue TEMPLATE [OPTIONS] INPUT...
        cue TEMPLATE [OPTIONS] -M MANIFEST
        cue -f RECORD [OPTIONS]
-       cue list | show TEMPLATE | init TEMPLATE | completion"""
+       cue list | show TEMPLATE | init TEMPLATE | completion [--install]"""
 
 
 def submit_parser() -> argparse.ArgumentParser:
@@ -569,6 +576,12 @@ def command_parser(command: str) -> argparse.ArgumentParser:
     parser = Parser(prog=f"cue {command}", description=helps[command])
     if command in ("show", "init"):
         parser.add_argument("template")
+    if command == "completion":
+        parser.add_argument(
+            "--install",
+            action="store_true",
+            help="copy the file to ~/.local/share/bash-completion/completions",
+        )
     return parser
 
 
@@ -645,7 +658,7 @@ def dispatch(argv: Sequence[str]) -> int:
         return cmd_show(str(args.template))
     if command == "init":
         return cmd_init(str(args.template))
-    return cmd_completion()
+    return cmd_completion(bool(args.install))
 
 
 def main(argv: Sequence[str] | None = None) -> int:

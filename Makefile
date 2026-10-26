@@ -1,7 +1,7 @@
 .PHONY: test check goldens
 
 PY = $(wildcard bin/cue tests/*.py)
-SH = $(wildcard lib/*.sh templates/*.sbatch contrib/*.sbatch tests/lib/*.bats)
+SH = $(wildcard lib/*.sh templates/*.sbatch contrib/*.sbatch completions/cue tests/lib/*.bats)
 
 test:
 	$(if $(wildcard tests/test_*.py),python3 -m unittest discover -s tests)

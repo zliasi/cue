@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# Bash completion for cue. Install per user with: cue completion --install
+
+_cue_templates() {
+  cue list 2>/dev/null | awk '{print $1}'
+}
+
+_cue_files() {
+  # Inputs matching the template's ext header, plus directories to descend.
+  local ext
+  ext=$(cue show "$1" 2>/dev/null | sed -n 's/^#CUE .*ext=\([^ ]*\).*/\1/p' | head -1)
+  if [ -n "$ext" ]; then
+    mapfile -t COMPREPLY < <(
+      compgen -f -X "!*$ext" -- "$cur"
+      compgen -d -- "$cur"
+    )
+  else
+    mapfile -t COMPREPLY < <(compgen -f -- "$cur")
+  fi
+}
+
+_cue() {
+  local cur prev words cword
+  if declare -F _init_completion >/dev/null; then
+    _init_completion || return
+  else
+    COMPREPLY=()
+    cur=${COMP_WORDS[COMP_CWORD]}
+    prev=${COMP_WORDS[COMP_CWORD - 1]}
+    words=("${COMP_WORDS[@]}")
+    cword=$COMP_CWORD
+  fi
+  local commands="list show init completion"
+  local options="-M --manifest -f --record -c --cpus -m --memory -t --time
+    -p --partition -T --throttle -j --name -o --outdir -l --logdir -n --ntasks
+    --gpu --set --skip-done --dry-run --after -h --help"
+  case $prev in
+    -M | --manifest | -f | --record | -o | --outdir | -l | --logdir)
+      compopt -o filenames 2>/dev/null
+      mapfile -t COMPREPLY < <(compgen -f -- "$cur")
+      return
+      ;;
+    -p | --partition)
+      mapfile -t COMPREPLY < <(compgen -W "$(sinfo -h -o %P 2>/dev/null | tr -d '*')" -- "$cur")
+      return
+      ;;
+    -c | --cpus | -m | --memory | -t | --time | -T | --throttle | -j | --name | -n | --ntasks | --set | --after)
+      return
+      ;;
+  esac
+  if ((cword == 1)); then
+    mapfile -t COMPREPLY < <(compgen -W "$commands -f $(_cue_templates)" -- "$cur")
+    return
+  fi
+  case ${words[1]} in
+    show | init)
+      ((cword == 2)) && mapfile -t COMPREPLY < <(compgen -W "$(_cue_templates)" -- "$cur")
+      return
+      ;;
+    list)
+      return
+      ;;
+    completion)
+      mapfile -t COMPREPLY < <(compgen -W "--install" -- "$cur")
+      return
+      ;;
+  esac
+  if [[ $cur == -* ]]; then
+    mapfile -t COMPREPLY < <(compgen -W "$options" -- "$cur")
+    return
+  fi
+  compopt -o filenames 2>/dev/null
+  _cue_files "${words[1]}"
+}
+
+complete -F _cue cue

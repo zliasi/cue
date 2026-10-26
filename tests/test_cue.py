@@ -206,6 +206,7 @@ class CommandTest(unittest.TestCase):
         # Shipped templates render next to the fixture ones.
         for template in (ROOT / "templates").glob("*.sbatch"):
             shutil.copy(template, self.dir / "home" / "templates")
+        shutil.copytree(ROOT / "completions", self.dir / "home" / "completions")
         bin_dir = self.dir / "bin"
         bin_dir.mkdir()
         sbatch = bin_dir / "sbatch"
@@ -215,6 +216,7 @@ class CommandTest(unittest.TestCase):
         env = {
             "CUE_HOME": "home",
             "XDG_CONFIG_HOME": "xdg",
+            "XDG_DATA_HOME": "data",
             "PATH": f"{bin_dir}:{os.environ.get('PATH', '')}",
             "FAKE_SBATCH_ARGS": str(self.args_file),
             "FAKE_SBATCH_FAIL": "",
@@ -422,6 +424,15 @@ class CommandTest(unittest.TestCase):
     def test_wrong_extension_is_rejected(self) -> None:
         status, out, err = self.run_cue(["orca", "w1.sh"])
         self.assertEqual((status, err), (1, "cue: w1.sh does not end with .inp\n"))
+
+    def test_completion_prints_and_installs(self) -> None:
+        status, out, err = self.run_cue(["completion"])
+        self.assertEqual((status, err), (0, ""))
+        self.assertEqual(out, (ROOT / "completions" / "cue").read_text())
+        status, out, err = self.run_cue(["completion", "--install"])
+        target = Path("data/bash-completion/completions/cue")
+        self.assertEqual((status, out, err), (0, f"{target}\n", ""))
+        self.assertEqual(target.read_text(), (ROOT / "completions" / "cue").read_text())
 
     def test_list_show_and_init(self) -> None:
         status, out, err = self.run_cue(["list"])
