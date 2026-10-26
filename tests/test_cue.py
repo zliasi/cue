@@ -310,6 +310,14 @@ class CommandTest(unittest.TestCase):
         status, out, err = self.run_cue(["gaussian", "a.inp"])
         self.assertEqual((status, err), (1, "cue: a.inp does not end with .com\n"))
 
+    def test_gpaw_renders_with_ranks_and_env(self) -> None:
+        argv = ["gpaw", "-n", "2", "-c", "1", "-m", "2", "-t", "00:10:00", "-p"]
+        argv += ["katla_short", "-T", "4", "--set", "python=/envs/atlas/bin/python"]
+        status, out, err = self.run_cue(argv + ["h2.py"])
+        self.assertEqual((status, err), (0, ""))
+        script = Path("log") / f"gpaw-{STAMP}.sbatch"
+        self.assert_golden("gpaw-flags", script.read_text())
+
     def test_python_worker_takes_manifest_lines(self) -> None:
         argv = ["python", "-M", "list.txt", "--set", "script=worker.py", "-c", "2"]
         argv += ["-m", "2", "-t", "00:10:00", "-p", "katla_short", "-T", "2"]
