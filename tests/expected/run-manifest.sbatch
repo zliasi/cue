@@ -1,12 +1,26 @@
 #!/usr/bin/env bash
+# Any script per input, run in the submission directory, no scratch.
+# The launcher is bash, change it with --set launcher=python3 or launcher=
+# in cue.conf. Stdout goes to the output directory as <stem>.out.
 #SBATCH --job-name=run
-#SBATCH --partition=chem
-#SBATCH --ntasks=4
+#SBATCH --partition=katla_short
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2
-#SBATCH --mem=4G
-#SBATCH --time=01:00:00
-#SBATCH --gres=gpu:1
+#SBATCH --gpus=0
+#SBATCH --mem=1G
+#SBATCH --time=00:05:00
 #SBATCH --array=0-1%4
 #SBATCH --output=log/%x_%A_%a.out
-script=$(sed -n "$((SLURM_ARRAY_TASK_ID + 1))p" "log/run-20261015-160000.manifest")
-bash "$script" > "out/$(basename "$script" .sh).out"
+#SBATCH --export=NONE
+# shellcheck source=lib/cue.sh
+source "home/lib/cue.sh"
+input=$(cue_line "log/run-20261015-160000.manifest") || exit 1
+export OMP_NUM_THREADS="2"
+export CUE_INPUT="$input" CUE_OUTDIR="out"
+mkdir -p "$CUE_OUTDIR"
+stem=$(basename "$input")
+stem=${stem%.*}
+echo "cue: job ${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID} on $(hostname) at $(date '+%F %T'), input $input"
+launcher="bash"
+"$launcher" "$input" >"$CUE_OUTDIR/$stem.out"

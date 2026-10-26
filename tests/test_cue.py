@@ -279,13 +279,14 @@ class CommandTest(unittest.TestCase):
         self.assertIn("cpus=2\nlogdir=logs\nmemory=4\nname=batch1\n", record)
 
     def test_manifest_set_and_gpu_render(self) -> None:
-        argv = ["run", "-M", "list.txt", "-n", "4", "--gpu", "--set", "cpus=2"]
+        argv = ["custom", "-M", "list.txt", "-n", "4", "--gpu", "--set", "cpus=2"]
         argv += ["--after", "100"]
         status, out, err = self.run_cue(argv)
         self.assertEqual((status, err), (0, ""))
-        self.assert_golden("run-manifest", Path(f"log/run-{STAMP}.sbatch").read_text())
+        script = Path("log") / f"custom-{STAMP}.sbatch"
+        self.assert_golden("custom-manifest", script.read_text())
         self.assertEqual(
-            Path(f"log/run-{STAMP}.manifest").read_text(), "w1.sh\nw2.sh\n"
+            Path(f"log/custom-{STAMP}.manifest").read_text(), "w1.sh\nw2.sh\n"
         )
         self.assertIn("--dependency=afterok:100", self.sbatch_args())
 
@@ -317,6 +318,12 @@ class CommandTest(unittest.TestCase):
         self.assertEqual((status, err), (0, ""))
         script = Path("log") / f"gpaw-{STAMP}.sbatch"
         self.assert_golden("gpaw-flags", script.read_text())
+
+    def test_run_launches_any_script(self) -> None:
+        argv = ["run", "-M", "list.txt", "-c", "2", "-m", "1", "-t", "00:05:00"]
+        status, out, err = self.run_cue(argv + ["-p", "katla_short", "-T", "4"])
+        self.assertEqual((status, err), (0, ""))
+        self.assert_golden("run-manifest", Path(f"log/run-{STAMP}.sbatch").read_text())
 
     def test_python_worker_takes_manifest_lines(self) -> None:
         argv = ["python", "-M", "list.txt", "--set", "script=worker.py", "-c", "2"]
@@ -396,7 +403,7 @@ class CommandTest(unittest.TestCase):
         self.assertFalse(list(Path("log").glob("*.cue")))
 
     def test_missing_placeholder_is_a_user_error(self) -> None:
-        status, out, err = self.run_cue(["run", "w1.sh"])
+        status, out, err = self.run_cue(["custom", "w1.sh"])
         self.assertEqual(status, 1)
         self.assertIn("no value for gpu, ntasks", err)
         self.assertFalse(Path("log").exists())
