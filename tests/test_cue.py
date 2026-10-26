@@ -289,6 +289,27 @@ class CommandTest(unittest.TestCase):
         )
         self.assertIn("--dependency=afterok:100", self.sbatch_args())
 
+    def test_gaussian_renders_with_flags(self) -> None:
+        argv = [
+            "gaussian",
+            "-c",
+            "2",
+            "-m",
+            "2",
+            "-t",
+            "00:10:00",
+            "-p",
+            "katla_short",
+            "-T",
+            "4",
+        ]
+        status, out, err = self.run_cue(argv + ["h2o.com"])
+        self.assertEqual((status, err), (0, ""))
+        script = Path("log") / f"gaussian-{STAMP}.sbatch"
+        self.assert_golden("gaussian-flags", script.read_text())
+        status, out, err = self.run_cue(["gaussian", "a.inp"])
+        self.assertEqual((status, err), (1, "cue: a.inp does not end with .com\n"))
+
     def test_python_worker_takes_manifest_lines(self) -> None:
         argv = ["python", "-M", "list.txt", "--set", "script=worker.py", "-c", "2"]
         argv += ["-m", "2", "-t", "00:10:00", "-p", "katla_short", "-T", "2"]
